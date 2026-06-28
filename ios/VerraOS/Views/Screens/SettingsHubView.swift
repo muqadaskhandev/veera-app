@@ -45,7 +45,10 @@ struct SettingsHubView: View {
                     .buttonStyle(.plain)
 
                     NavigationLink {
-                        SecurityView()
+                        SecurityView(onLogOut: {
+                            dismiss()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { onLogOut() }
+                        })
                     } label: {
                         SettingsRow(
                             icon: "lock.fill",

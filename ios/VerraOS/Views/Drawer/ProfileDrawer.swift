@@ -16,6 +16,7 @@ struct ProfileDrawer: View {
     var onAppSettings: () -> Void = {}
     var onLegal: () -> Void = {}
     var onHelp: () -> Void = {}
+    var onLogOut: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -34,6 +35,15 @@ struct ProfileDrawer: View {
                     section(title: "Admin") {
                         DrawerRow(icon: "doc.text", label: "Legal Documents", trailing: "arrow.up.right", action: onLegal)
                         DrawerRow(icon: "questionmark.circle", label: "Help & Support", action: onHelp)
+                    }
+                    divider
+                    section(title: "Session") {
+                        DrawerRow(
+                            icon: "rectangle.portrait.and.arrow.right",
+                            label: "Log Out",
+                            isDestructive: true,
+                            action: onLogOut
+                        )
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.md)

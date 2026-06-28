@@ -70,6 +70,7 @@ struct ClientRootView: View {
     @State private var showingEditDetails = false
     @State private var showingHelp = false
     @State private var showingSettings = false
+    @State private var showLogOutConfirm = false
 
     private let client: Client
     private let conversationID: UUID
@@ -161,6 +162,10 @@ struct ClientRootView: View {
                 onDeleteAccount: onLogOut
             )
         }
+        .confirmationDialog("Log out of VerraOS?", isPresented: $showLogOutConfirm, titleVisibility: .visible) {
+            Button("Log Out", role: .destructive) { onLogOut() }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     // MARK: Shell
@@ -226,7 +231,8 @@ struct ClientRootView: View {
             onLegal: {
                 closeDrawer()
                 openURL(legalURL)
-            }
+            },
+            onLogOut: { presentAfterDrawer { showLogOutConfirm = true } }
         )
         .frame(width: drawerWidth)
         .offset(x: isDrawerOpen ? 0 : -drawerWidth)

@@ -31,10 +31,10 @@ struct RootView: View {
                 )
                 .transition(.opacity)
             case .trainer:
-                ContentView(onLogOut: { setRole(.none) })
+                ContentView(onLogOut: signOut)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             case .client:
-                ClientRootView(onLogOut: { setRole(.none) })
+                ClientRootView(onLogOut: signOut)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
@@ -88,6 +88,14 @@ struct RootView: View {
 
     private func setRole(_ newRole: AppRole) {
         role = newRole
+    }
+
+    private func signOut() {
+        AuthStore.signOut()
+        onboardedTrainer = false
+        onboardedClient = false
+        onboardingRole = nil
+        withAnimation { setRole(.none) }
     }
 }
 

@@ -9,6 +9,8 @@ import SwiftUI
 struct SecurityView: View {
     @Environment(TrainerStore.self) private var store
 
+    var onLogOut: () -> Void = {}
+
     @State private var currentPassword = ""
     @State private var newPassword = ""
     @State private var confirmPassword = ""
@@ -37,9 +39,7 @@ struct SecurityView: View {
         .tint(Theme.Color.accent)
         .toast($toast)
         .confirmationDialog("Log out of VerraOS?", isPresented: $showLogOutConfirm, titleVisibility: .visible) {
-            Button("Log Out", role: .destructive) {
-                toast = ToastData(message: "Signed out (simulated)", icon: "rectangle.portrait.and.arrow.right")
-            }
+            Button("Log Out", role: .destructive) { onLogOut() }
             Button("Cancel", role: .cancel) {}
         }
     }

@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var showingNotifications = false
     @State private var showingEditProfile = false
     @State private var showingHelp = false
+    @State private var showLogOutConfirm = false
 
     /// Public legal page opened from the drawer's Legal row.
     private let legalURL = URL(string: "https://verraos.app/legal")!
@@ -74,6 +75,10 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingHelp) {
             HelpSupportView()
+        }
+        .confirmationDialog("Log out of VerraOS?", isPresented: $showLogOutConfirm, titleVisibility: .visible) {
+            Button("Log Out", role: .destructive) { onLogOut() }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -128,7 +133,8 @@ struct ContentView: View {
                 app.closeDrawer()
                 openURL(legalURL)
             },
-            onHelp: { presentAfterDrawer { showingHelp = true } }
+            onHelp: { presentAfterDrawer { showingHelp = true } },
+            onLogOut: { presentAfterDrawer { showLogOutConfirm = true } }
         )
         .frame(width: drawerWidth)
         .offset(x: app.isDrawerOpen ? 0 : -drawerWidth)

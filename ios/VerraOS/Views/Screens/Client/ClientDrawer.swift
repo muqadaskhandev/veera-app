@@ -21,6 +21,7 @@ struct ClientDrawer: View {
     var onAppSettings: () -> Void = {}
     var onHelp: () -> Void = {}
     var onLegal: () -> Void = {}
+    var onLogOut: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -41,6 +42,15 @@ struct ClientDrawer: View {
                     section(title: "Support") {
                         ClientDrawerRow(icon: "questionmark.circle", label: "Help & Support", action: onHelp)
                         ClientDrawerRow(icon: "doc.text", label: "Legal Documents", trailing: "arrow.up.right", action: onLegal)
+                    }
+                    divider
+                    section(title: "Session") {
+                        ClientDrawerRow(
+                            icon: "rectangle.portrait.and.arrow.right",
+                            label: "Log Out",
+                            isDestructive: true,
+                            action: onLogOut
+                        )
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.md)

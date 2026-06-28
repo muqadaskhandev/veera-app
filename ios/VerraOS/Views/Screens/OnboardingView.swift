@@ -11,6 +11,7 @@
 
 import SwiftUI
 import UserNotifications
+import AuthenticationServices
 
 /// Which experience the onboarding flow is tailoring itself to.
 enum OnboardingRole {
@@ -30,13 +31,15 @@ private struct Seg {
 
 /// A single tappable option in a questionnaire step.
 private struct OBOption: Identifiable {
-    let id = UUID()
-    let title: String
-    let subtitle: String?
-    init(_ title: String, _ subtitle: String? = nil) {
-        self.title = title
-        self.subtitle = subtitle
-    }
+  /// Stable id so selection survives SwiftUI re-renders.
+  let id: String
+  let title: String
+  let subtitle: String?
+  init(_ title: String, _ subtitle: String? = nil) {
+    self.id = title
+    self.title = title
+    self.subtitle = subtitle
+  }
 }
 
 /// A numbered questionnaire step.
@@ -73,10 +76,34 @@ struct OnboardingView: View {
 
     @State private var index = 0
     @State private var appeared = false
-    @State private var answers: [String: UUID] = [:]
+    @State private var answers: [String: String] = [:]
+    @State private var inviteCode = ""
     @State private var notificationsResolved = false
     @State private var notificationsDenied = false
     @State private var agreedToComms = true
+    @State private var showingEmailFields = false
+    @State private var registerName = ""
+    @State private var registerEmail = ""
+    @State private var registerPassword = ""
+    @State private var isSaving = false
+    @State private var saveError: String?
+    @State private var showingEmailCodeEntry = false
+    @State private var verificationEmail = ""
+    @State private var verificationCode = ""
+    @State private var devCodeHint: String?
+    @State private var showingLogin = false
+    @State private var showingLoginEmailFields = false
+    @State private var loginEmail = ""
+    @State private var loginPassword = ""
+    @State private var showingForgotPassword = false
+    @State private var showingResetPassword = false
+    @State private var forgotPasswordEmail = ""
+    @State private var forgotPasswordMessage: String?
+    @State private var devResetToken: String?
+    @State private var resetToken = ""
+    @State private var resetPassword = ""
+    @State private var resetPasswordConfirm = ""
+    @State private var successMessage: String?
 
     private let questionTotal = 7
 
@@ -208,6 +235,22 @@ struct OnboardingView: View {
         .onAppear {
             withAnimation(.easeOut(duration: 0.6).delay(0.05)) { appeared = true }
         }
+        .alert("Something went wrong", isPresented: .init(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(saveError ?? "")
+        }
+        .alert("Success", isPresented: .init(
+            get: { successMessage != nil },
+            set: { if !$0 { successMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(successMessage ?? "")
+        }
     }
 
     // MARK: Top bar
@@ -255,6 +298,22 @@ struct OnboardingView: View {
     // MARK: Invite
 
     private var inviteBody: some View {
+        Group {
+            if showingResetPassword {
+                resetPasswordBody
+            } else if showingForgotPassword {
+                forgotPasswordBody
+            } else if showingLogin {
+                loginBody
+            } else {
+                inviteEntryBody
+            }
+        }
+        .padding(.horizontal, 28)
+        .opacity(appeared ? 1 : 0)
+    }
+
+    private var inviteEntryBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer()
             headlineText([
@@ -267,17 +326,224 @@ struct OnboardingView: View {
                 .foregroundStyle(.white.opacity(0.7))
                 .padding(.top, 14)
 
-            InviteCodeField()
+            InviteCodeField(code: $inviteCode)
                 .padding(.top, 28)
 
             Spacer()
             Spacer()
         }
-        .padding(.horizontal, 28)
-        .opacity(appeared ? 1 : 0)
     }
 
-    // MARK: Preview
+    private var loginBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer()
+            (
+                Text("Welcome back\n").foregroundStyle(.white)
+                + Text("sign in to your account").foregroundStyle(.white.opacity(0.45))
+            )
+            .font(.system(size: 36, weight: .black))
+            .fontWidth(.condensed)
+            .textCase(.uppercase)
+            .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 14) {
+                Button(action: { Task { await signInWithApple(isLogin: true) } }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "apple.logo")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(Theme.Color.accentInk)
+                        Text(isSaving ? "Signing in…" : "Continue with Apple")
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .foregroundStyle(.black)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(.white, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(isSaving)
+
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        showingLoginEmailFields.toggle()
+                    }
+                }) {
+                    Text(showingLoginEmailFields ? "Hide Email Form" : "Continue with Email")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.Color.accentInk)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
+                        .background(Theme.Color.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(isSaving)
+
+                if showingLoginEmailFields {
+                    VStack(spacing: 12) {
+                        registerField("Email", text: $loginEmail)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.emailAddress)
+                        passwordField("Password", text: $loginPassword)
+
+                        Button(action: { Task { await signInWithEmail() } }) {
+                            Text(isSaving ? "Signing in…" : "Sign In")
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                                .foregroundStyle(Theme.Color.accentInk)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(Theme.Color.accent, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isSaving || !canSubmitLogin)
+                        .opacity(canSubmitLogin ? 1 : 0.45)
+
+                        HStack {
+                            Button(action: { openForgotPassword() }) {
+                                Text("Forgot password?")
+                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.65))
+                            }
+                            .buttonStyle(.plain)
+
+                            Spacer()
+
+                            Button(action: { openResetPassword() }) {
+                                Text("Have a reset code?")
+                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(Theme.Color.accent.opacity(0.9))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.top, 4)
+                    }
+                    .padding(.top, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding(.top, 36)
+
+            Spacer()
+        }
+    }
+
+    private var forgotPasswordBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer()
+            headlineText([
+                Seg("Forgot your "),
+                Seg("password", accent: true),
+                Seg("?"),
+            ], size: 30)
+
+            Text("Enter your email and we'll send you a link to reset your password.")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+                .padding(.top, 14)
+
+            registerField("Email", text: $forgotPasswordEmail)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.emailAddress)
+                .padding(.top, 28)
+
+            if let forgotPasswordMessage {
+                Text(forgotPasswordMessage)
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundStyle(Theme.Color.accent)
+                    .padding(.top, 16)
+
+                #if DEBUG
+                if let devResetToken {
+                    Text("Dev reset token: \(devResetToken)")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .padding(.top, 8)
+                }
+                #endif
+            }
+
+            Button(action: { Task { await submitForgotPassword() } }) {
+                Text(isSaving ? "Sending…" : (forgotPasswordMessage == nil ? "Send Reset Link" : "Resend Link"))
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.Color.accentInk)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(Theme.Color.accent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(isSaving || !forgotPasswordEmail.contains("@"))
+            .opacity(forgotPasswordEmail.contains("@") ? 1 : 0.45)
+            .padding(.top, 24)
+
+            if forgotPasswordMessage != nil {
+                Button(action: { openResetPassword(prefillToken: devResetToken) }) {
+                    Text("Enter reset code")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.08), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 12)
+            }
+
+            Spacer()
+        }
+    }
+
+    private var resetPasswordBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer()
+            headlineText([
+                Seg("Set a new "),
+                Seg("password", accent: true),
+            ], size: 30)
+
+            Text("Paste the reset code from your email and choose a new password.")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+                .padding(.top, 14)
+
+            VStack(spacing: 12) {
+                registerField("Reset code", text: $resetToken)
+                    .textInputAutocapitalization(.never)
+                passwordField(
+                    "New password (8+ characters)",
+                    text: $resetPassword,
+                    hasError: resetPasswordTooShort
+                )
+                passwordField(
+                    "Confirm new password",
+                    text: $resetPasswordConfirm,
+                    hasError: resetPasswordMismatch
+                )
+
+                passwordValidationMessages(
+                    password: resetPassword,
+                    confirm: resetPasswordConfirm
+                )
+            }
+            .padding(.top, 28)
+
+            Button(action: { Task { await submitResetPassword() } }) {
+                Text(isSaving ? "Updating…" : "Update Password")
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.Color.accentInk)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(Theme.Color.accent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(isSaving || !canSubmitResetPassword)
+            .opacity(canSubmitResetPassword ? 1 : 0.45)
+            .padding(.top, 24)
+
+            Spacer()
+        }
+    }
+
+    // MARK: Preview (was invite-only body)
 
     private func previewBody(mock: PreviewMock, headline: [Seg]) -> some View {
         VStack(spacing: 0) {
@@ -428,6 +694,18 @@ struct OnboardingView: View {
     // MARK: Register
 
     private var registerBody: some View {
+        Group {
+            if showingEmailCodeEntry {
+                emailCodeEntryBody
+            } else {
+                registerOptionsBody
+            }
+        }
+        .padding(.horizontal, 28)
+        .opacity(appeared ? 1 : 0)
+    }
+
+    private var registerOptionsBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer()
             (
@@ -440,12 +718,12 @@ struct OnboardingView: View {
             .fixedSize(horizontal: false, vertical: true)
 
             VStack(spacing: 14) {
-                Button(action: finish) {
+                Button(action: { Task { await signInWithApple(isLogin: false) } }) {
                     HStack(spacing: 12) {
-                        Image(systemName: "g.circle.fill")
-                            .font(.system(size: 20))
+                        Image(systemName: "apple.logo")
+                            .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(Theme.Color.accentInk)
-                        Text("Continue with Google")
+                        Text(isSaving ? "Saving…" : "Continue with Apple")
                             .font(.system(size: 17, weight: .bold, design: .rounded))
                             .foregroundStyle(.black)
                     }
@@ -454,9 +732,14 @@ struct OnboardingView: View {
                     .background(.white, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .disabled(isSaving)
 
-                Button(action: finish) {
-                    Text("Continue with Email")
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        showingEmailFields.toggle()
+                    }
+                }) {
+                    Text(showingEmailFields ? "Hide Email Form" : "Continue with Email")
                         .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.Color.accentInk)
                         .frame(maxWidth: .infinity)
@@ -464,6 +747,37 @@ struct OnboardingView: View {
                         .background(Theme.Color.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .disabled(isSaving)
+
+                if showingEmailFields {
+                    VStack(spacing: 12) {
+                        registerField("Display name", text: $registerName)
+                        registerField("Email", text: $registerEmail)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.emailAddress)
+                        passwordField(
+                            "Password (8+ characters)",
+                            text: $registerPassword,
+                            hasError: registerPasswordTooShort
+                        )
+
+                        passwordValidationMessages(password: registerPassword, confirm: nil)
+
+                        Button(action: { Task { await signUpWithEmail() } }) {
+                            Text(isSaving ? "Saving…" : "Save & Continue")
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                                .foregroundStyle(Theme.Color.accentInk)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(Theme.Color.accent, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isSaving || !canSubmitEmail)
+                        .opacity(canSubmitEmail ? 1 : 0.45)
+                    }
+                    .padding(.top, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
             .padding(.top, 36)
 
@@ -502,8 +816,101 @@ struct OnboardingView: View {
                 .multilineTextAlignment(.trailing)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .padding(.horizontal, 28)
-        .opacity(appeared ? 1 : 0)
+    }
+
+    private var emailCodeEntryBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer()
+            headlineText([
+                Seg("Enter the "),
+                Seg("6-digit code", accent: true),
+                Seg(" we sent to your email"),
+            ], size: 30)
+
+            Text(verificationEmail)
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(Theme.Color.accent)
+                .padding(.top, 14)
+
+            #if DEBUG
+            if let devCodeHint {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Development mode", systemImage: "hammer.fill")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.Color.accent)
+                    Text("Real emails are not sent yet. Use this code: \(devCodeHint)")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(Theme.Color.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.md)
+                        .stroke(Theme.Color.accent.opacity(0.35), lineWidth: 1)
+                )
+                .padding(.top, 16)
+            }
+            #endif
+
+            TextField("", text: $verificationCode, prompt: Text("000000").foregroundColor(.white.opacity(0.35)))
+                .keyboardType(.numberPad)
+                .textContentType(.oneTimeCode)
+                .font(.system(size: 32, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .tracking(10)
+                .padding(.vertical, 20)
+                .padding(.horizontal, 18)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.md)
+                        .stroke(Theme.Color.accent.opacity(0.45), lineWidth: 1)
+                )
+                .padding(.top, 28)
+                .onChange(of: verificationCode) { _, newValue in
+                    let digits = newValue.filter(\.isNumber)
+                    verificationCode = String(digits.prefix(6))
+                }
+
+            Button(action: { Task { await verifyEmailCode() } }) {
+                Text(isSaving ? "Verifying…" : "Verify & Continue")
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.Color.accentInk)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(Theme.Color.accent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(isSaving || verificationCode.count != 6)
+            .opacity(verificationCode.count == 6 ? 1 : 0.45)
+            .padding(.top, 20)
+
+            Text("Check your inbox and spam folder.")
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.45))
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 18)
+
+            Button(action: { Task { await resendVerificationCode() } }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(isSaving ? "Sending…" : "Resend Code")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(Color.white.opacity(0.08), in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .disabled(isSaving)
+            .padding(.top, 12)
+
+            Spacer()
+        }
     }
 
     // MARK: Bottom bar
@@ -520,7 +927,34 @@ struct OnboardingView: View {
         case .hello:
             controlRow(label: "I'M READY")
         case .invite:
-            controlRow(label: "Continue")
+            if showingLogin || showingForgotPassword || showingResetPassword {
+                HStack {
+                    backButton
+                    Spacer()
+                }
+            } else {
+                VStack(spacing: 14) {
+                    controlRow(label: "Continue")
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showingLogin = true
+                            appeared = false
+                        }
+                        withAnimation(.easeOut(duration: 0.5).delay(0.05)) { appeared = true }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("Already have an account?")
+                                .foregroundStyle(.white.opacity(0.55))
+                            Text("Log in")
+                                .foregroundStyle(Theme.Color.accent)
+                                .fontWeight(.bold)
+                        }
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         case .preview:
             controlRow(label: "Next")
         case .question:
@@ -530,18 +964,28 @@ struct OnboardingView: View {
         }
     }
 
+    private var canAdvance: Bool {
+        switch current {
+        case .question(let q):
+            return answers[q.key] != nil
+        default:
+            return true
+        }
+    }
+
     private func controlRow(label: String) -> some View {
         HStack(spacing: 14) {
             if !isFirst { backButton }
             Button(action: advance) {
                 Text(label)
                     .font(.system(size: 18, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.Color.accentInk)
+                    .foregroundStyle(canAdvance ? Theme.Color.accentInk : Theme.Color.accentInk.opacity(0.35))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 18)
-                    .background(Theme.Color.accent, in: Capsule())
+                    .background((canAdvance ? Theme.Color.accent : Theme.Color.accent.opacity(0.35)), in: Capsule())
             }
             .buttonStyle(.plain)
+            .disabled(!canAdvance || isSaving)
         }
     }
 
@@ -559,6 +1003,7 @@ struct OnboardingView: View {
     // MARK: Actions
 
     private func advance() {
+        guard canAdvance else { return }
         if index >= screens.count - 1 {
             finish()
         } else {
@@ -571,6 +1016,40 @@ struct OnboardingView: View {
     }
 
     private func goBack() {
+        if case .invite = current, showingResetPassword {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showingResetPassword = false
+                clearResetPasswordFields()
+                showingLogin = true
+                showingLoginEmailFields = true
+            }
+            return
+        }
+        if case .invite = current, showingForgotPassword {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showingForgotPassword = false
+                forgotPasswordMessage = nil
+                devResetToken = nil
+                showingLogin = true
+            }
+            return
+        }
+        if case .invite = current, showingLogin {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showingLogin = false
+                showingLoginEmailFields = false
+                loginEmail = ""
+                loginPassword = ""
+            }
+            return
+        }
+        if case .register = current, showingEmailCodeEntry {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showingEmailCodeEntry = false
+                verificationCode = ""
+            }
+            return
+        }
         guard index > 0 else { return }
         withAnimation(.easeInOut(duration: 0.25)) {
             index -= 1
@@ -588,11 +1067,324 @@ struct OnboardingView: View {
         }
     }
 
-    private func finish() {
-        onFinish("", "")
+    private var canSubmitLogin: Bool {
+        loginEmail.contains("@") && loginPassword.count >= 8
     }
 
-    // MARK: Headline helper
+    private var canSubmitResetPassword: Bool {
+        !resetToken.trimmingCharacters(in: .whitespaces).isEmpty
+            && resetPassword.count >= 8
+            && resetPassword == resetPasswordConfirm
+    }
+
+    private func openForgotPassword() {
+        forgotPasswordEmail = loginEmail
+        forgotPasswordMessage = nil
+        devResetToken = nil
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            showingLogin = false
+            showingForgotPassword = true
+        }
+    }
+
+    private func openResetPassword(prefillToken: String? = nil) {
+        resetToken = prefillToken ?? devResetToken ?? ""
+        resetPassword = ""
+        resetPasswordConfirm = ""
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            showingLogin = false
+            showingForgotPassword = false
+            showingResetPassword = true
+        }
+    }
+
+    private func clearResetPasswordFields() {
+        resetToken = ""
+        resetPassword = ""
+        resetPasswordConfirm = ""
+    }
+
+    private var canSubmitEmail: Bool {
+        !registerName.trimmingCharacters(in: .whitespaces).isEmpty
+            && registerEmail.contains("@")
+            && registerPassword.count >= 8
+    }
+
+    private var registerPasswordTooShort: Bool {
+        !registerPassword.isEmpty && registerPassword.count < 8
+    }
+
+    private var resetPasswordTooShort: Bool {
+        !resetPassword.isEmpty && resetPassword.count < 8
+    }
+
+    private var resetPasswordMismatch: Bool {
+        !resetPasswordConfirm.isEmpty && resetPassword != resetPasswordConfirm
+    }
+
+    private func passwordField(_ placeholder: String, text: Binding<String>, hasError: Bool = false) -> some View {
+        PasswordField(placeholder: placeholder, text: text, hasError: hasError)
+    }
+
+    @ViewBuilder
+    private func passwordValidationMessages(password: String, confirm: String?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !password.isEmpty && password.count < 8 {
+                passwordValidationLine("Password must be at least 8 characters")
+            }
+            if let confirm, !confirm.isEmpty, password != confirm {
+                passwordValidationLine("Passwords don't match")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 4)
+    }
+
+    private func passwordValidationLine(_ message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 13, weight: .semibold))
+            Text(message)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+        }
+        .foregroundStyle(Theme.Color.danger)
+    }
+
+    private func registerField(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField("", text: text, prompt: Text(placeholder).foregroundColor(.white.opacity(0.4)))
+            .font(.system(size: 17, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.md)
+                    .stroke(.white.opacity(0.18), lineWidth: 1)
+            )
+    }
+
+    @MainActor
+    private func signUpWithEmail() async {
+        guard canSubmitEmail, !isSaving else { return }
+        isSaving = true
+        saveError = nil
+        defer { isSaving = false }
+
+        do {
+            let name = registerName.trimmingCharacters(in: .whitespaces)
+            let email = registerEmail.trimmingCharacters(in: .whitespaces).lowercased()
+            let response: RegisterResponse
+
+            switch role {
+            case .trainer:
+                response = try await VerraAPI.registerTrainer(
+                    email: email,
+                    password: registerPassword,
+                    displayName: name
+                )
+            case .client:
+                response = try await VerraAPI.registerClient(
+                    email: email,
+                    password: registerPassword,
+                    displayName: name,
+                    inviteCode: inviteCode.isEmpty ? nil : inviteCode
+                )
+            }
+
+            if response.requiresEmailVerification {
+                verificationEmail = response.email
+                devCodeHint = response.devCode
+                verificationCode = ""
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    showingEmailCodeEntry = true
+                }
+                return
+            }
+
+            guard
+                let accessToken = response.accessToken,
+                let refreshToken = response.refreshToken,
+                let expiresIn = response.expiresIn,
+                let user = response.user
+            else {
+                saveError = "Registration did not return account details."
+                return
+            }
+
+            let auth = AuthTokenResponse(
+                accessToken: accessToken,
+                refreshToken: refreshToken,
+                expiresIn: expiresIn,
+                user: user
+            )
+            try await OnboardingAuthService.complete(
+                role: role,
+                auth: auth,
+                trainerAnswers: answers,
+                onComplete: { name in onFinish(name, "") }
+            )
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func verifyEmailCode() async {
+        guard verificationCode.count == 6, !isSaving else { return }
+        isSaving = true
+        saveError = nil
+        defer { isSaving = false }
+
+        do {
+            let auth = try await VerraAPI.verifyEmail(email: verificationEmail, code: verificationCode)
+            try await OnboardingAuthService.complete(
+                role: role,
+                auth: auth,
+                trainerAnswers: answers,
+                onComplete: { name in onFinish(name, "") }
+            )
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func resendVerificationCode() async {
+        guard !isSaving else { return }
+        isSaving = true
+        saveError = nil
+        defer { isSaving = false }
+
+        do {
+            let response = try await VerraAPI.resendVerificationEmail(email: verificationEmail)
+            devCodeHint = response.devCode
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func submitForgotPassword() async {
+        let email = forgotPasswordEmail.trimmingCharacters(in: .whitespaces).lowercased()
+        guard email.contains("@"), !isSaving else { return }
+        isSaving = true
+        saveError = nil
+        defer { isSaving = false }
+
+        do {
+            let response = try await VerraAPI.requestPasswordReset(email: email)
+            forgotPasswordMessage = response.message
+            devResetToken = response.resetToken
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func submitResetPassword() async {
+        guard canSubmitResetPassword, !isSaving else { return }
+        isSaving = true
+        saveError = nil
+        defer { isSaving = false }
+
+        do {
+            let response = try await VerraAPI.resetPassword(
+                token: resetToken.trimmingCharacters(in: .whitespaces),
+                newPassword: resetPassword
+            )
+            loginEmail = forgotPasswordEmail.isEmpty ? loginEmail : forgotPasswordEmail
+            loginPassword = ""
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showingResetPassword = false
+                showingForgotPassword = false
+                showingLogin = true
+                showingLoginEmailFields = true
+                clearResetPasswordFields()
+                forgotPasswordMessage = nil
+                devResetToken = nil
+            }
+            successMessage = response.message
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func signInWithEmail() async {
+        guard canSubmitLogin, !isSaving else { return }
+        isSaving = true
+        saveError = nil
+        defer { isSaving = false }
+
+        do {
+            let email = loginEmail.trimmingCharacters(in: .whitespaces).lowercased()
+            let auth = try await VerraAPI.login(email: email, password: loginPassword)
+            try finishLogin(auth: auth)
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func signInWithApple(isLogin: Bool) async {
+        guard !isSaving else { return }
+        isSaving = true
+        saveError = nil
+        defer { isSaving = false }
+
+        do {
+            let apple = try await AppleSignInService.signIn()
+            let fallbackName = registerName.trimmingCharacters(in: .whitespaces)
+            let displayName = apple.displayName ?? (fallbackName.isEmpty ? nil : fallbackName)
+
+            let auth = try await VerraAPI.signInWithApple(
+                identityToken: apple.identityToken,
+                role: role,
+                displayName: isLogin ? nil : displayName,
+                inviteCode: inviteCode.isEmpty ? nil : inviteCode
+            )
+
+            if isLogin {
+                try finishLogin(auth: auth)
+            } else {
+                try await OnboardingAuthService.complete(
+                    role: role,
+                    auth: auth,
+                    trainerAnswers: answers,
+                    onComplete: { name in onFinish(name, "") }
+                )
+            }
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func finishLogin(auth: AuthTokenResponse) throws {
+        let expectedRole = role == .trainer ? "trainer" : "client"
+        guard auth.user.role == expectedRole else {
+            AuthStore.clear()
+            let roleLabel = auth.user.role == "trainer" ? "trainer" : "client"
+            throw NSError(
+                domain: "VerraAuth",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "This account is registered as a \(roleLabel). Go back and choose \(roleLabel.capitalized) on the welcome screen."]
+            )
+        }
+        AuthStore.save(accessToken: auth.accessToken, refreshToken: auth.refreshToken)
+        onFinish(auth.user.displayName, "")
+    }
+
+    private func finish() {
+        switch role {
+        case .trainer:
+            break
+        case .client:
+            if inviteCode.trimmingCharacters(in: .whitespaces).isEmpty {
+                onFinish("", "")
+            }
+        }
+    }
 
     private func headlineText(_ segs: [Seg], size: CGFloat = 34) -> some View {
         segs.reduce(Text("")) { partial, seg in
@@ -604,6 +1396,51 @@ struct OnboardingView: View {
         .lineSpacing(1)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Password field
+
+private struct PasswordField: View {
+    let placeholder: String
+    @Binding var text: String
+    var hasError: Bool = false
+
+    @State private var isRevealed = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Group {
+                if isRevealed {
+                    TextField("", text: $text, prompt: Text(placeholder).foregroundColor(.white.opacity(0.4)))
+                } else {
+                    SecureField("", text: $text, prompt: Text(placeholder).foregroundColor(.white.opacity(0.4)))
+                }
+            }
+            .font(.system(size: 17, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+
+            Button {
+                isRevealed.toggle()
+            } label: {
+                Image(systemName: isRevealed ? "eye.slash" : "eye")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isRevealed ? "Hide password" : "Show password")
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 10)
+        .padding(.vertical, 16)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.md)
+                .stroke(hasError ? Theme.Color.danger.opacity(0.75) : .white.opacity(0.18), lineWidth: 1)
+        )
     }
 }
 
@@ -680,7 +1517,7 @@ private struct OptionCard: View {
 // MARK: - Invite code field
 
 private struct InviteCodeField: View {
-    @State private var code = ""
+    @Binding var code: String
     @FocusState private var focused: Bool
 
     var body: some View {
