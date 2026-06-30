@@ -17,11 +17,30 @@ private enum AppRole {
 struct RootView: View {
     @State private var role: AppRole = .none
     @State private var onboardingRole: OnboardingRole?
+    @State private var isCheckingSession = AuthStore.accessToken != nil
 
     @AppStorage("verra.onboarded.trainer") private var onboardedTrainer = false
     @AppStorage("verra.onboarded.client") private var onboardedClient = false
 
     var body: some View {
+        ZStack {
+            if isCheckingSession {
+                Color.black
+                    .ignoresSafeArea()
+            } else {
+                mainContent
+            }
+        }
+        .task {
+            if AuthStore.accessToken != nil {
+                await restoreSessionIfNeeded()
+            }
+            isCheckingSession = false
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
         ZStack {
             switch role {
             case .none:
@@ -88,6 +107,25 @@ struct RootView: View {
 
     private func setRole(_ newRole: AppRole) {
         role = newRole
+    }
+
+    @MainActor
+    private func restoreSessionIfNeeded() async {
+        guard let user = await SessionRestoreService.restoreSession() else { return }
+
+        switch user.role {
+        case "trainer":
+            onboardedTrainer = true
+            setRole(.trainer)
+        case "client":
+            onboardedClient = true
+            if !user.displayName.isEmpty {
+                UserDefaults.standard.set(user.displayName, forKey: "verra.client.displayName")
+            }
+            setRole(.client)
+        default:
+            break
+        }
     }
 
     private func signOut() {

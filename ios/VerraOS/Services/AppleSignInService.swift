@@ -1,8 +1,11 @@
 import AuthenticationServices
+import Foundation
 import UIKit
 
 struct AppleSignInResult {
+    let userID: String
     let identityToken: String
+    let email: String?
     let displayName: String?
 }
 
@@ -24,6 +27,51 @@ enum AppleSignInService {
             controller.performRequests()
         }
     }
+
+    static func result(from authorization: ASAuthorization) throws -> AppleSignInResult {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let tokenData = credential.identityToken,
+              let identityToken = String(data: tokenData, encoding: .utf8) else {
+            throw APIError.server("Apple Sign-In did not return a valid token")
+        }
+
+        let nameParts = [credential.fullName?.givenName, credential.fullName?.familyName]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+        let displayName = nameParts.isEmpty ? nil : nameParts.joined(separator: " ")
+
+        AppleCredentialStore.appleUserID = credential.user
+
+        return AppleSignInResult(
+            userID: credential.user,
+            identityToken: identityToken,
+            email: credential.email,
+            displayName: displayName
+        )
+    }
+
+    static func mapError(_ error: Error) -> Error {
+        let nsError = error as NSError
+        if nsError.domain == ASAuthorizationError.errorDomain {
+            switch nsError.code {
+            case ASAuthorizationError.canceled.rawValue:
+                return APIError.server("Apple Sign-In was cancelled")
+            case ASAuthorizationError.unknown.rawValue:
+                return APIError.server(
+                    "Sign in with Apple is not configured for this build. In Xcode, select your Development Team, confirm the Sign in with Apple capability is enabled, and enable it on your App ID in the Apple Developer portal."
+                )
+            case ASAuthorizationError.invalidResponse.rawValue:
+                return APIError.server("Apple Sign-In returned an invalid response. Try again or use a physical device.")
+            case ASAuthorizationError.notHandled.rawValue:
+                return APIError.server("Apple Sign-In could not be presented. Try again.")
+            case ASAuthorizationError.failed.rawValue:
+                return APIError.server("Apple Sign-In failed. Sign into an Apple ID in Settings and try again.")
+            default:
+                break
+            }
+        }
+        return error
+    }
 }
 
 private final class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
@@ -35,36 +83,29 @@ private final class AppleSignInDelegate: NSObject, ASAuthorizationControllerDele
     }
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first { $0.isKeyWindow } ?? ASPresentationAnchor()
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        for scene in scenes where scene.activationState == .foregroundActive {
+            if let window = scene.windows.first(where: \.isKeyWindow) {
+                return window
+            }
+            if let window = scene.windows.first {
+                return window
+            }
+        }
+        return scenes.flatMap(\.windows).first ?? ASPresentationAnchor()
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
         defer { retainSelf = nil }
-
-        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
-              let tokenData = credential.identityToken,
-              let identityToken = String(data: tokenData, encoding: .utf8) else {
-            completion(.failure(APIError.server("Apple Sign-In did not return a valid token")))
-            return
+        do {
+            completion(.success(try AppleSignInService.result(from: authorization)))
+        } catch {
+            completion(.failure(error))
         }
-
-        let nameParts = [credential.fullName?.givenName, credential.fullName?.familyName]
-            .compactMap { $0 }
-            .filter { !$0.isEmpty }
-        let displayName = nameParts.isEmpty ? nil : nameParts.joined(separator: " ")
-
-        completion(.success(AppleSignInResult(identityToken: identityToken, displayName: displayName)))
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
         defer { retainSelf = nil }
-        if (error as NSError).code == ASAuthorizationError.canceled.rawValue {
-            completion(.failure(APIError.server("Apple Sign-In was cancelled")))
-        } else {
-            completion(.failure(error))
-        }
+        completion(.failure(AppleSignInService.mapError(error)))
     }
 }

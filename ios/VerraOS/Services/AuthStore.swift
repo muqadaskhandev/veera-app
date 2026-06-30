@@ -32,6 +32,7 @@ enum AuthStore {
     /// Clears auth tokens and local onboarding flags so the welcome flow can run again.
     static func signOut() {
         clear()
+        AppleCredentialStore.appleUserID = nil
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: onboardedTrainerKey)
         defaults.removeObject(forKey: onboardedClientKey)

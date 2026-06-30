@@ -361,21 +361,9 @@ struct OnboardingView: View {
             .fixedSize(horizontal: false, vertical: true)
 
             VStack(spacing: 14) {
-                Button(action: { Task { await signInWithApple(isLogin: true) } }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "apple.logo")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(Theme.Color.accentInk)
-                        Text(isSaving ? "Signing in…" : "Continue with Apple")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(.black)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
-                    .background(.white, in: Capsule())
+                AppleSignInButton(isDisabled: isSaving) { result in
+                    Task { await handleAppleSignInResult(result, isLogin: true) }
                 }
-                .buttonStyle(.plain)
-                .disabled(isSaving)
 
                 Button(action: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -741,21 +729,9 @@ struct OnboardingView: View {
             .fixedSize(horizontal: false, vertical: true)
 
             VStack(spacing: 14) {
-                Button(action: { Task { await signInWithApple(isLogin: false) } }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "apple.logo")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(Theme.Color.accentInk)
-                        Text(isSaving ? "Saving…" : "Continue with Apple")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(.black)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
-                    .background(.white, in: Capsule())
+                AppleSignInButton(isDisabled: isSaving) { result in
+                    Task { await handleAppleSignInResult(result, isLogin: false) }
                 }
-                .buttonStyle(.plain)
-                .disabled(isSaving)
 
                 Button(action: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -1456,14 +1432,27 @@ struct OnboardingView: View {
     }
 
     @MainActor
-    private func signInWithApple(isLogin: Bool) async {
+    private func handleAppleSignInResult(_ result: Result<AppleSignInResult, Error>, isLogin: Bool) async {
+        switch result {
+        case .failure(let error):
+            let mapped = AppleSignInService.mapError(error)
+            if case APIError.server(let message) = mapped, message == "Apple Sign-In was cancelled" {
+                return
+            }
+            saveError = authErrorMessage(mapped)
+        case .success(let apple):
+            await signInWithApple(isLogin: isLogin, apple: apple)
+        }
+    }
+
+    @MainActor
+    private func signInWithApple(isLogin: Bool, apple: AppleSignInResult) async {
         guard !isSaving else { return }
         isSaving = true
         saveError = nil
         defer { isSaving = false }
 
         do {
-            let apple = try await AppleSignInService.signIn()
             let fallbackName = registerName.trimmingCharacters(in: .whitespaces)
             let displayName = apple.displayName ?? (fallbackName.isEmpty ? nil : fallbackName)
 
@@ -1507,6 +1496,15 @@ struct OnboardingView: View {
 
     private func finish() {
         // Onboarding completes through register / login / email verification — not by advancing past the last screen.
+    }
+
+    private func authErrorMessage(_ error: Error) -> String {
+        if let localized = error as? LocalizedError,
+           let description = localized.errorDescription,
+           !description.isEmpty {
+            return description
+        }
+        return error.localizedDescription
     }
 
     private func headlineText(_ segs: [Seg], size: CGFloat = 34) -> some View {

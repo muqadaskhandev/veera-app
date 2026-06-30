@@ -215,4 +215,20 @@ enum VerraAPI {
             )
         )
     }
+
+    struct RefreshBody: Encodable {
+        let refreshToken: String
+    }
+
+    static func me(accessToken: String) async throws -> AuthUserDTO {
+        try await APIClient.shared.request("/api/auth/me", token: accessToken)
+    }
+
+    static func refresh(refreshToken: String) async throws -> AuthTokenResponse {
+        try await APIClient.shared.request(
+            "/api/auth/refresh",
+            method: "POST",
+            body: RefreshBody(refreshToken: refreshToken)
+        )
+    }
 }
