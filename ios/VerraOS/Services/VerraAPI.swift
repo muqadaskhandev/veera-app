@@ -330,6 +330,44 @@ enum VerraAPI {
             token: accessToken
         )
     }
+
+    struct CreateInviteBody: Encodable {
+        let expiresInDays: Int?
+        let clientEmail: String?
+        let clientName: String?
+    }
+
+    struct InviteCreatedResponse: Decodable {
+        let invite: InviteCodeDTO
+        let emailSent: Bool
+    }
+
+    struct InviteCodeDTO: Decodable {
+        let id: UUID
+        let code: String
+        let trainerID: UUID
+        let expiresAt: Date?
+        let redeemedAt: Date?
+        let isRedeemable: Bool
+    }
+
+    static func createInvite(
+        clientEmail: String?,
+        clientName: String?,
+        expiresInDays: Int? = 30,
+        accessToken: String
+    ) async throws -> InviteCreatedResponse {
+        try await APIClient.shared.request(
+            "/api/invites",
+            method: "POST",
+            body: CreateInviteBody(
+                expiresInDays: expiresInDays,
+                clientEmail: clientEmail,
+                clientName: clientName
+            ),
+            token: accessToken
+        )
+    }
 }
 
 private struct EmptyResponse: Decodable {}

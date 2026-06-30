@@ -61,6 +61,14 @@ enum AuthService {
 
     static func verifyEmail(code: String, email: String, on request: Request) async throws -> AuthTokenResponse {
         let user = try await EmailVerificationService.verify(code: code, email: email, on: request.db)
+        if let address = user.email, let role = user.userRole {
+            TransactionalEmailService.queueWelcome(
+                to: address,
+                displayName: user.displayName,
+                role: role,
+                on: request.application
+            )
+        }
         return try await TokenService.issueTokens(for: user, on: request)
     }
 

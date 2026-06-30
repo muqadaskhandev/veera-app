@@ -34,9 +34,8 @@ struct InviteController: RouteCollection {
     }
 
     @Sendable
-    func create(req: Request) async throws -> InviteCodeDTO {
+    func create(req: Request) async throws -> InviteCreatedResponse {
         let user = try req.auth.require(User.self)
-        struct CreateInviteRequest: Content { var expiresInDays: Int? }
         let payload = try req.content.decode(CreateInviteRequest.self)
 
         guard let trainer = try await Trainer.query(on: req.db).filter(\.$user.$id == user.id!).first() else {
@@ -49,6 +48,24 @@ struct InviteController: RouteCollection {
             expiresInDays: payload.expiresInDays,
             on: req.db
         )
-        return try InviteCodeDTO(from: invite)
+
+        var emailSent = false
+        if let rawEmail = payload.clientEmail, !rawEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let email = try ClientInviteEmailService.normalizeEmail(rawEmail)
+            ClientInviteEmailService.queueInvite(
+                to: email,
+                trainerName: trainer.name,
+                clientName: payload.clientName,
+                code: invite.code,
+                expiresAt: invite.expiresAt,
+                on: req.application
+            )
+            emailSent = true
+        }
+
+        return InviteCreatedResponse(
+            invite: try InviteCodeDTO(from: invite),
+            emailSent: emailSent
+        )
     }
 }

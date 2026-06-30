@@ -29,6 +29,7 @@ struct AddClientView: View {
     @State private var goal: String = ""
     @State private var skill: String = "Beginner"
     @State private var sessionBalance: Int = 8
+    @State private var isInviting = false
 
     private let skillLevels = ["Beginner", "Intermediate", "Advanced"]
 
@@ -60,8 +61,8 @@ struct AddClientView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Invite", action: invite)
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(canInvite ? Theme.Color.ink : Theme.Color.inkFaint)
-                        .disabled(!canInvite)
+                        .foregroundStyle(canInvite && !isInviting ? Theme.Color.ink : Theme.Color.inkFaint)
+                        .disabled(!canInvite || isInviting)
                 }
             }
         }
@@ -237,6 +238,41 @@ struct AddClientView: View {
         let initials = Self.initials(from: trimmed)
         let contactValue = contact.trimmingCharacters(in: .whitespaces)
 
+        Task {
+            isInviting = true
+            defer { isInviting = false }
+
+            var emailSent = false
+            if channel == .email, let token = AuthStore.accessToken {
+                do {
+                    let response = try await VerraAPI.createInvite(
+                        clientEmail: contactValue,
+                        clientName: trimmed,
+                        accessToken: token
+                    )
+                    emailSent = response.emailSent
+                } catch {
+                    onInvited("Invite saved locally — email could not be sent")
+                    addLocalClient(name: trimmed, initials: initials, contactValue: contactValue)
+                    dismiss()
+                    return
+                }
+            }
+
+            addLocalClient(name: trimmed, initials: initials, contactValue: contactValue)
+
+            if channel == .email && emailSent {
+                onInvited("Invite email sent to \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed)")
+            } else if channel == .email {
+                onInvited("Invite created for \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed)")
+            } else {
+                onInvited("Invite sent to \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed) via \(channel.label)")
+            }
+            dismiss()
+        }
+    }
+
+    private func addLocalClient(name trimmed: String, initials: String, contactValue: String) {
         let client = Client(
             name: trimmed,
             initials: initials,
@@ -257,8 +293,6 @@ struct AddClientView: View {
         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
             store.add(client)
         }
-        onInvited("Invite sent to \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed) via \(channel.label)")
-        dismiss()
     }
 
     /// Parses the entered weight (in the trainer's unit) and converts it to kg.

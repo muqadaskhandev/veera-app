@@ -45,39 +45,24 @@ enum PasswordResetService {
     }
 
     static func sendResetCode(to email: String, code: String, on app: Application) async throws {
-        let subject = "Your Verra password reset code"
-        let textBody = """
-        Your Verra password reset code is: \(code)
-
-        This code expires in 10 minutes.
-        If you did not request this, you can ignore this email.
-        """
-        let htmlBody = """
-        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111;">
-          <p>Your Verra password reset code is:</p>
-          <p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:16px 0;">\(code)</p>
-          <p style="color:#555;">This code expires in 10 minutes.</p>
-          <p style="color:#555;">If you did not request this, you can ignore this email.</p>
-        </div>
-        """
-
-        try await SESEmailService.send(
-            to: email,
-            subject: subject,
-            textBody: textBody,
-            htmlBody: htmlBody,
-            on: app
-        )
+        if SESEmailService.isConfigured() {
+            let template = EmailTemplateService.passwordResetEmail(code: code)
+            try await SESEmailService.send(
+                to: email,
+                subject: template.subject,
+                textBody: template.text,
+                htmlBody: template.html,
+                on: app
+            )
+        } else if app.environment == .development {
+            TransactionalEmailService.queuePasswordReset(to: email, code: code, on: app)
+        } else {
+            throw Abort(.internalServerError, reason: "Email service is not configured")
+        }
     }
 
     static func queueResetEmail(to email: String, code: String, on app: Application) {
-        Task {
-            do {
-                try await sendResetCode(to: email, code: code, on: app)
-            } catch {
-                app.logger.error("Password reset email delivery failed: \(error)")
-            }
-        }
+        TransactionalEmailService.queuePasswordReset(to: email, code: code, on: app)
     }
 
     static func resetPassword(
