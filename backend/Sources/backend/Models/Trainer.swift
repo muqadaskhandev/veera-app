@@ -16,6 +16,9 @@ final class Trainer: Model, @unchecked Sendable {
     @Field(key: "bio")
     var bio: String
 
+    @OptionalField(key: "specialties_json")
+    var specialtiesJSON: String?
+
     @Timestamp(key: "created_at", on: .create)
     var createdAt: Date?
 
@@ -45,8 +48,10 @@ struct TrainerDTO: Content {
     let name: String
     let title: String
     let bio: String
+    let specialties: [String]
+    let avatarURL: String?
 
-    init(from trainer: Trainer) throws {
+    init(from trainer: Trainer, avatarURL: String? = nil) throws {
         guard let id = trainer.id else {
             throw Abort(.internalServerError, reason: "Trainer missing id")
         }
@@ -54,5 +59,38 @@ struct TrainerDTO: Content {
         self.name = trainer.name
         self.title = trainer.title
         self.bio = trainer.bio
+        self.specialties = TrainerSpecialties.decode(trainer.specialtiesJSON)
+        self.avatarURL = avatarURL
+    }
+
+    init(
+        id: UUID,
+        name: String,
+        title: String,
+        bio: String,
+        specialties: [String],
+        avatarURL: String?
+    ) {
+        self.id = id
+        self.name = name
+        self.title = title
+        self.bio = bio
+        self.specialties = specialties
+        self.avatarURL = avatarURL
+    }
+}
+
+enum TrainerSpecialties {
+    static func decode(_ json: String?) -> [String] {
+        guard let json, let data = json.data(using: .utf8),
+              let values = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return values
+    }
+
+    static func encode(_ values: [String]) -> String {
+        let data = (try? JSONEncoder().encode(values)) ?? Data("[]".utf8)
+        return String(data: data, encoding: .utf8) ?? "[]"
     }
 }

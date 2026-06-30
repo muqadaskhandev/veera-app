@@ -19,7 +19,8 @@ struct TrainerController: RouteCollection {
 
     @Sendable
     func index(req: Request) async throws -> [TrainerDTO] {
-        try await Trainer.query(on: req.db).all().map(TrainerDTO.init)
+        let trainers = try await Trainer.query(on: req.db).all()
+        return try trainers.map { try TrainerDTO(from: $0) }
     }
 
     @Sendable

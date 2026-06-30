@@ -25,6 +25,9 @@ final class User: Model, Content, Authenticatable, @unchecked Sendable {
     @Field(key: "display_name")
     var displayName: String
 
+    @OptionalField(key: "avatar_path")
+    var avatarPath: String?
+
     @Field(key: "is_email_verified")
     var isEmailVerified: Bool
 

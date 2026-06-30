@@ -243,6 +243,19 @@ struct OnboardingView: View {
                 .transition(.opacity)
                 .zIndex(1)
             }
+
+            if showingResetPassword {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: 12)
+                    resetPasswordBody
+                        .padding(.horizontal, 28)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+                .transition(.opacity)
+                .zIndex(1)
+            }
         }
         .onAppear {
             withAnimation(.easeOut(duration: 0.6).delay(0.05)) { appeared = true }
@@ -311,9 +324,7 @@ struct OnboardingView: View {
 
     private var inviteBody: some View {
         Group {
-            if showingResetPassword {
-                resetPasswordBody
-            } else if showingForgotPassword {
+            if showingForgotPassword {
                 forgotPasswordBody
             } else if showingLogin {
                 loginBody
@@ -491,71 +502,105 @@ struct OnboardingView: View {
     }
 
     private var resetPasswordBody: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Spacer()
-            headlineText([
-                Seg("Set a new "),
-                Seg("password", accent: true),
-            ], size: 30)
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                headlineText([
+                    Seg("Enter your "),
+                    Seg("reset code", accent: true),
+                ], size: 30)
 
-            Text("Paste the reset code from your email and choose a new password.")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
-                .padding(.top, 14)
+                Text(forgotPasswordEmail)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.Color.accent)
+                    .padding(.top, 14)
 
-            VStack(spacing: 12) {
+                Text("Paste the 6-digit code from your email. Code expires in 10 minutes.")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.top, 8)
+
                 TextField("", text: $resetCode, prompt: Text("000000").foregroundColor(.white.opacity(0.35)))
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
-                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .font(.system(size: 32, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
-                    .tracking(8)
-                    .padding(.vertical, 16)
+                    .tracking(10)
+                    .padding(.vertical, 20)
                     .padding(.horizontal, 18)
                     .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.Radius.md)
                             .stroke(Theme.Color.accent.opacity(0.45), lineWidth: 1)
                     )
+                    .padding(.top, 28)
                     .onChange(of: resetCode) { _, newValue in
                         let digits = newValue.filter(\.isNumber)
                         resetCode = String(digits.prefix(6))
                     }
 
-                passwordField(
-                    "New password (8+ characters)",
-                    text: $resetPassword,
-                    hasError: resetPasswordTooShort
-                )
-                passwordField(
-                    "Confirm new password",
-                    text: $resetPasswordConfirm,
-                    hasError: resetPasswordMismatch
-                )
+                if resetCode.count == 6 {
+                    VStack(spacing: 12) {
+                        Text("Choose a new password")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.Color.accent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 8)
 
-                passwordValidationMessages(
-                    password: resetPassword,
-                    confirm: resetPasswordConfirm
-                )
-            }
-            .padding(.top, 28)
+                        passwordField(
+                            "New password (8+ characters)",
+                            text: $resetPassword,
+                            hasError: resetPasswordTooShort
+                        )
+                        passwordField(
+                            "Confirm new password",
+                            text: $resetPasswordConfirm,
+                            hasError: resetPasswordMismatch
+                        )
 
-            Button(action: { Task { await submitResetPassword() } }) {
-                Text(isSaving ? "Updating…" : "Update Password")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.Color.accentInk)
+                        passwordValidationMessages(
+                            password: resetPassword,
+                            confirm: resetPasswordConfirm
+                        )
+                    }
+                    .padding(.top, 20)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                Button(action: { Task { await submitResetPassword() } }) {
+                    Text(isSaving ? "Updating…" : (resetCode.count == 6 ? "Update Password" : "Enter 6-digit code"))
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.Color.accentInk)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
+                        .background(Theme.Color.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(isSaving || !canSubmitResetPassword)
+                .opacity(canSubmitResetPassword ? 1 : 0.45)
+                .padding(.top, 24)
+
+                Button(action: { Task { await submitForgotPassword() } }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text(forgotResendButtonTitle)
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
-                    .background(Theme.Color.accent, in: Capsule())
+                    .padding(.vertical, 16)
+                    .background(Color.white.opacity(0.08), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSaving || forgotResendCooldownRemaining > 0)
+                .opacity(forgotResendCooldownRemaining > 0 ? 0.45 : 1)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
-            .buttonStyle(.plain)
-            .disabled(isSaving || !canSubmitResetPassword)
-            .opacity(canSubmitResetPassword ? 1 : 0.45)
-            .padding(.top, 24)
-
-            Spacer()
         }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: resetCode.count == 6)
     }
 
     // MARK: Preview (was invite-only body)
@@ -1046,8 +1091,7 @@ struct OnboardingView: View {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 showingResetPassword = false
                 clearResetPasswordFields()
-                showingLogin = true
-                showingLoginEmailFields = true
+                showingForgotPassword = true
             }
             return
         }
@@ -1117,8 +1161,6 @@ struct OnboardingView: View {
         resetPassword = ""
         resetPasswordConfirm = ""
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-            showingLogin = false
-            showingForgotPassword = false
             showingResetPassword = true
         }
     }
@@ -1344,6 +1386,7 @@ struct OnboardingView: View {
             let response = try await VerraAPI.requestPasswordReset(email: email)
             forgotPasswordMessage = response.message
             startForgotResendCooldown(seconds: response.retryAfterSeconds ?? 60)
+            openResetPassword()
         } catch {
             saveError = error.localizedDescription
         }

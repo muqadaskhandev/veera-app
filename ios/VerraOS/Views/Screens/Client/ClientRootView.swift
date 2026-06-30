@@ -62,6 +62,7 @@ struct ClientRootView: View {
     @State private var profile: ProfileStore
     @State private var messages: MessageStore
     @State private var trainer = TrainerStore()
+    @State private var account = ClientAccountStore()
     @State private var wearables = WearableConnectionStore()
 
     @State private var tab: ClientTab = .dashboard
@@ -72,10 +73,27 @@ struct ClientRootView: View {
     @State private var showingSettings = false
     @State private var showLogOutConfirm = false
 
-    private let client: Client
+    private var client: Client {
+        account.client ?? Self.placeholderClient
+    }
+
+    private var coachName: String {
+        let name = account.coachProfile.name
+        return name.isEmpty ? "Your Trainer" : name
+    }
+
+    private var coachTitle: String {
+        account.coachProfile.title
+    }
+
+    private static let placeholderClient = Client(
+        name: "Loading…",
+        initials: "…",
+        sessionsRemaining: 0,
+        status: .active
+    )
+
     private let conversationID: UUID
-    private let coachName = "Your Trainer"
-    private let coachTitle = ""
     private let drawerWidth: CGFloat = 308
     private let appVersion = "v1.0.2"
     private let legalURL = URL(string: "https://verraos.app/legal")!
@@ -84,36 +102,17 @@ struct ClientRootView: View {
     init(onLogOut: @escaping () -> Void = {}) {
         self.onLogOut = onLogOut
 
-        // Build a clean client identity from the onboarding name (if provided).
-        let savedName = UserDefaults.standard.string(forKey: "verra.client.displayName") ?? ""
-        let displayName = savedName.isEmpty ? "Your Profile" : savedName
-        var fresh = Client(
-            name: displayName,
-            initials: Self.initials(from: displayName),
-            sessionsRemaining: 0,
-            status: .active
-        )
-        if let savedGoal = UserDefaults.standard.string(forKey: "verra.client.goal"),
-           !savedGoal.isEmpty {
-            fresh.primaryGoal = savedGoal
-        }
-        self.client = fresh
-
-        // Seed the roster with this single client so their own profile resolves.
-        _clients = State(initialValue: ClientStore(clients: [fresh]))
-
-        // Start with an empty schedule — the client's sessions are populated for real.
-        let sched = ScheduleStore(sessions: [], clients: [fresh])
+        let placeholder = Self.placeholderClient
+        _clients = State(initialValue: ClientStore(clients: [placeholder]))
+        let sched = ScheduleStore(sessions: [], clients: [placeholder])
         _schedule = State(initialValue: sched)
 
-        // A single empty conversation thread with their coach.
-        let store = MessageStore(conversations: [MessageStore.clientThread(for: fresh)])
+        let store = MessageStore(conversations: [MessageStore.clientThread(for: placeholder)])
         _messages = State(initialValue: store)
         self.conversationID = store.conversations.first?.id ?? UUID()
 
-        // The client's plan areas are visible but start empty until the trainer fills them.
         let p = ProfileStore()
-        p.setVisibleModules([.workout, .wearables, .weight, .nutrition, .photos, .financials], for: fresh.id)
+        p.setVisibleModules([.workout, .wearables, .weight, .nutrition, .photos, .financials], for: placeholder.id)
         _profile = State(initialValue: p)
     }
 
@@ -145,11 +144,17 @@ struct ClientRootView: View {
         .environment(messages)
         .environment(trainer)
         .environment(wearables)
+        .environment(account)
         .sheet(isPresented: $showingTrainerProfile) {
-            ClientTrainerProfileView(profile: trainer.profile)
+            ClientTrainerProfileView(profile: account.coachProfile)
         }
         .sheet(isPresented: $showingEditDetails) {
-            ClientEditDetailsSheet(name: client.name, email: client.email)
+            ClientEditDetailsSheet(account: account)
+        }
+        .onChange(of: showingEditDetails) { _, isShowing in
+            if !isShowing {
+                syncFromAccount()
+            }
         }
         .sheet(isPresented: $showingHelp) {
             HelpSupportView()
@@ -166,6 +171,22 @@ struct ClientRootView: View {
             Button("Log Out", role: .destructive) { onLogOut() }
             Button("Cancel", role: .cancel) {}
         }
+        .task {
+            await account.refreshFromServer()
+            syncFromAccount()
+        }
+    }
+
+    @MainActor
+    private func syncFromAccount() {
+        guard let loaded = account.client else { return }
+        clients.clients = [loaded]
+        schedule.clients = [loaded]
+        trainer.profile = account.coachProfile
+        profile.setVisibleModules(
+            [.workout, .wearables, .weight, .nutrition, .photos, .financials],
+            for: loaded.id
+        )
     }
 
     // MARK: Shell
@@ -215,9 +236,10 @@ struct ClientRootView: View {
 
     private var drawer: some View {
         ClientDrawer(
-            name: client.name,
-            initials: client.initials,
-            email: client.email,
+            name: account.name.isEmpty ? client.name : account.name,
+            initials: account.initials,
+            email: account.email.isEmpty ? client.email : account.email,
+            avatarData: account.avatarData,
             version: appVersion,
             onClose: closeDrawer,
             onEditDetails: { presentAfterDrawer { showingEditDetails = true } },

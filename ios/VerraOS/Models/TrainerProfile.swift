@@ -95,6 +95,8 @@ struct TrainerProfile: Codable, Equatable {
     var title: String
     var bio: String
     var specialties: Set<Specialty>
+    /// Remote avatar path returned by the API, if any.
+    var avatarURL: String?
     /// Raw JPEG/PNG bytes of the chosen avatar, if any.
     var avatarData: Data?
 
@@ -115,11 +117,31 @@ struct TrainerProfile: Codable, Equatable {
     // Units (optional for backwards-compatible decoding of older stored profiles)
     var weightUnit: WeightUnit?
 
+    static let empty = TrainerProfile(
+        name: "",
+        title: "",
+        bio: "",
+        specialties: [],
+        avatarURL: nil,
+        avatarData: nil,
+        notificationsEnabled: true,
+        notifyMoney: true,
+        notifySchedule: true,
+        notifyActivity: true,
+        activityMode: .personalBests,
+        quietHoursEnabled: true,
+        quietStartMinutes: 22 * 60,
+        quietEndMinutes: 6 * 60,
+        biometricLoginEnabled: false,
+        weightUnit: .kg
+    )
+
     static let `default` = TrainerProfile(
         name: "Jordan Vale",
         title: "Head Strength Coach",
         bio: "Helping driven people get strong, move well, and stay consistent. 10+ years coaching strength and body recomposition.",
         specialties: [.strength, .hypertrophy, .nutrition],
+        avatarURL: nil,
         avatarData: nil,
         notificationsEnabled: true,
         notifyMoney: true,

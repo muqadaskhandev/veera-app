@@ -80,6 +80,9 @@ struct ContentView: View {
             Button("Log Out", role: .destructive) { onLogOut() }
             Button("Cancel", role: .cancel) {}
         }
+        .task {
+            await trainer.refreshFromServer()
+        }
     }
 
     // MARK: Shell

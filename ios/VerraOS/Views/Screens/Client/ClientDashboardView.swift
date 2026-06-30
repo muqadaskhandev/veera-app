@@ -18,6 +18,7 @@ struct ClientDashboardView: View {
     @Environment(ProfileStore.self) private var profile
     @Environment(TrainerStore.self) private var trainer
     @Environment(WearableConnectionStore.self) private var wearables
+    @Environment(ClientAccountStore.self) private var account
 
     private var unit: WeightUnit { trainer.units }
 
@@ -80,24 +81,36 @@ struct ClientDashboardView: View {
     // MARK: Identity
 
     private func identityHeader(_ client: Client) -> some View {
-        VStack(spacing: 12) {
-            Circle()
-                .fill(Theme.Color.ink)
-                .frame(width: 92, height: 92)
-                .overlay(
-                    Text(client.initials)
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Color.accent)
-                )
-                .overlay(alignment: .bottomTrailing) {
-                    Circle()
-                        .fill(client.effectiveStatus.tint)
-                        .frame(width: 22, height: 22)
-                        .overlay(Circle().stroke(Theme.Color.surface, lineWidth: 3))
-                }
-                .cardShadow(0.8)
+        let displayName = account.name.isEmpty ? client.name : account.name
+        let initials = account.initials.isEmpty ? client.initials : account.initials
 
-            Text(client.name)
+        return VStack(spacing: 12) {
+            Group {
+                if let data = account.avatarData, let image = UIImage(data: data) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Circle()
+                        .fill(Theme.Color.ink)
+                        .overlay(
+                            Text(initials)
+                                .font(.system(size: 32, weight: .bold, design: .rounded))
+                                .foregroundStyle(Theme.Color.accent)
+                        )
+                }
+            }
+            .frame(width: 92, height: 92)
+            .clipShape(Circle())
+            .overlay(alignment: .bottomTrailing) {
+                Circle()
+                    .fill(client.effectiveStatus.tint)
+                    .frame(width: 22, height: 22)
+                    .overlay(Circle().stroke(Theme.Color.surface, lineWidth: 3))
+            }
+            .cardShadow(0.8)
+
+            Text(displayName)
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(Theme.Color.ink)
         }

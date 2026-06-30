@@ -13,6 +13,7 @@ struct ClientDrawer: View {
     let name: String
     let initials: String
     let email: String
+    var avatarData: Data? = nil
     let version: String
     let onClose: () -> Void
     var onEditDetails: () -> Void = {}
@@ -86,15 +87,24 @@ struct ClientDrawer: View {
                 .accessibilityLabel("Close menu")
             }
 
-            Circle()
-                .fill(Theme.Color.ink)
-                .frame(width: 72, height: 72)
-                .overlay(
-                    Text(initials)
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Color.accent)
-                )
-                .overlay(Circle().stroke(Theme.Color.accent, lineWidth: 2).padding(-4))
+            Group {
+                if let avatarData, let image = UIImage(data: avatarData) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Circle()
+                        .fill(Theme.Color.ink)
+                        .overlay(
+                            Text(initials)
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .foregroundStyle(Theme.Color.accent)
+                        )
+                }
+            }
+            .frame(width: 72, height: 72)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(Theme.Color.accent, lineWidth: 2).padding(-4))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(name)

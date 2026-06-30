@@ -231,4 +231,33 @@ enum VerraAPI {
             body: RefreshBody(refreshToken: refreshToken)
         )
     }
+
+    static func fetchProfile(accessToken: String) async throws -> ProfileResponse {
+        try await APIClient.shared.request("/api/profile/me", token: accessToken)
+    }
+
+    static func updateProfile(accessToken: String, body: UpdateProfileBody) async throws -> ProfileResponse {
+        try await APIClient.shared.request(
+            "/api/profile/me",
+            method: "PATCH",
+            body: body,
+            token: accessToken
+        )
+    }
+
+    static func uploadAvatar(
+        imageData: Data,
+        filename: String,
+        mimeType: String,
+        accessToken: String
+    ) async throws -> ProfileResponse {
+        try await APIClient.shared.upload(
+            path: "/api/profile/avatar",
+            fieldName: "avatar",
+            fileData: imageData,
+            filename: filename,
+            mimeType: mimeType,
+            token: accessToken
+        )
+    }
 }

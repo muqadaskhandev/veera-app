@@ -15,6 +15,8 @@ struct EditProfileView: View {
     @State private var draft: TrainerProfile
     @State private var pickerItem: PhotosPickerItem?
     @State private var toast: ToastData?
+    @State private var isSaving = false
+    @State private var pendingAvatarData: Data?
 
     init(profile: TrainerProfile) {
         _draft = State(initialValue: profile)
@@ -43,12 +45,15 @@ struct EditProfileView: View {
                         .foregroundStyle(Theme.Color.inkMuted)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(Theme.Color.accentInk)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background(Theme.Color.accent, in: Capsule())
+                    Button(isSaving ? "Saving…" : "Save") {
+                        Task { await save() }
+                    }
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Theme.Color.accentInk)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Theme.Color.accent, in: Capsule())
+                    .disabled(isSaving)
                 }
             }
             .toast($toast)
@@ -166,9 +171,23 @@ struct EditProfileView: View {
 
     // MARK: Actions
 
-    private func save() {
-        store.profile = draft
-        dismiss()
+    private func save() async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            store.profile = draft
+            try await store.saveToServer(avatarUpload: pendingAvatarData)
+            pendingAvatarData = nil
+            await MainActor.run {
+                toast = ToastData(message: "Profile saved", icon: "checkmark.circle.fill")
+                dismiss()
+            }
+        } catch {
+            await MainActor.run {
+                toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.triangle.fill")
+            }
+        }
     }
 
     private func loadImage(_ item: PhotosPickerItem) async {
@@ -179,6 +198,7 @@ struct EditProfileView: View {
         if let jpeg = resized.jpegData(compressionQuality: 0.82) {
             await MainActor.run {
                 draft.avatarData = jpeg
+                pendingAvatarData = jpeg
                 toast = ToastData(message: "Photo updated", icon: "photo.fill")
             }
         }

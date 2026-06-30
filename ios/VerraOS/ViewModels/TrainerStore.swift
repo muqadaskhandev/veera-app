@@ -11,6 +11,8 @@ import SwiftUI
 final class TrainerStore {
     private static let storageKey = "verra.trainerProfile.v1"
 
+    var isLoadedFromServer = false
+
     var profile: TrainerProfile {
         didSet { persist() }
     }
@@ -20,8 +22,48 @@ final class TrainerStore {
            let decoded = try? JSONDecoder().decode(TrainerProfile.self, from: data) {
             profile = decoded
         } else {
-            profile = .default
+            profile = .empty
         }
+    }
+
+    @MainActor
+    func refreshFromServer() async {
+        guard let token = AuthStore.accessToken else { return }
+        do {
+            let response = try await VerraAPI.fetchProfile(accessToken: token)
+            await ProfileLoader.applyTrainer(response, to: self)
+        } catch {
+            // Keep cached profile when offline.
+        }
+    }
+
+    @MainActor
+    func saveToServer(avatarUpload: Data?) async throws {
+        guard let token = AuthStore.accessToken else {
+            throw APIError.server("Not signed in")
+        }
+
+        if let avatarUpload {
+            let response = try await VerraAPI.uploadAvatar(
+                imageData: avatarUpload,
+                filename: "avatar.jpg",
+                mimeType: "image/jpeg",
+                accessToken: token
+            )
+            await ProfileLoader.applyTrainer(response, to: self)
+        }
+
+        let response = try await VerraAPI.updateProfile(
+            accessToken: token,
+            body: UpdateProfileBody(
+                displayName: profile.name,
+                name: profile.name,
+                title: profile.title,
+                bio: profile.bio,
+                specialties: profile.specialties.map(\.rawValue).sorted()
+            )
+        )
+        await ProfileLoader.applyTrainer(response, to: self)
     }
 
     private func persist() {

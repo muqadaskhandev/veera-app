@@ -264,6 +264,15 @@ enum AuthService {
         )
         trainer.$user.id = try user.requireID()
         try await trainer.save(on: database)
+
+        let profile = Profile(
+            userID: try user.requireID(),
+            displayName: user.displayName,
+            title: "Strength Coach",
+            bio: "",
+            specialtiesJSON: "[]"
+        )
+        try await profile.save(on: database)
     }
 
     static func linkClientToInvite(
@@ -293,6 +302,15 @@ enum AuthService {
         )
         client.$user.id = try user.requireID()
         try await client.save(on: database)
+
+        let profile = Profile(
+            userID: try user.requireID(),
+            displayName: displayName,
+            title: "",
+            bio: "",
+            specialtiesJSON: "[]"
+        )
+        try await profile.save(on: database)
 
         invite.redeemedAt = Date()
         invite.$redeemedByUser.id = try user.requireID()
