@@ -90,7 +90,7 @@ struct OnboardingView: View {
     @State private var showingEmailCodeEntry = false
     @State private var verificationEmail = ""
     @State private var verificationCode = ""
-    @State private var devCodeHint: String?
+    @State private var resendCooldownRemaining = 0
     @State private var showingLogin = false
     @State private var showingLoginEmailFields = false
     @State private var loginEmail = ""
@@ -99,8 +99,8 @@ struct OnboardingView: View {
     @State private var showingResetPassword = false
     @State private var forgotPasswordEmail = ""
     @State private var forgotPasswordMessage: String?
-    @State private var devResetToken: String?
-    @State private var resetToken = ""
+    @State private var forgotResendCooldownRemaining = 0
+    @State private var resetCode = ""
     @State private var resetPassword = ""
     @State private var resetPasswordConfirm = ""
     @State private var successMessage: String?
@@ -110,9 +110,8 @@ struct OnboardingView: View {
     // MARK: Screen list
 
     private var screens: [OBScreen] {
-        // Clients only confirm an invite code, then drop straight into the app.
         if role == .client {
-            return [.invite]
+            return [.invite, .register]
         }
         return [
             .invite,
@@ -231,6 +230,19 @@ struct OnboardingView: View {
                     .padding(.horizontal, 28)
                     .padding(.bottom, 36)
             }
+
+            if showingEmailCodeEntry {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: 12)
+                    emailCodeEntryBody
+                        .padding(.horizontal, 28)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+                .transition(.opacity)
+                .zIndex(1)
+            }
         }
         .onAppear {
             withAnimation(.easeOut(duration: 0.6).delay(0.05)) { appeared = true }
@@ -321,7 +333,9 @@ struct OnboardingView: View {
                 Seg("invite code", accent: true),
                 Seg("?"),
             ])
-            Text("Enter the code from your trainer or studio. No code? You can skip this for now.")
+            Text(role == .client
+                ? "Enter the code from your trainer, then create your account on the next screen. No code? You can still sign up."
+                : "Enter the code from your trainer or studio. No code? You can skip this for now.")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
                 .padding(.top, 14)
@@ -435,7 +449,7 @@ struct OnboardingView: View {
                 Seg("?"),
             ], size: 30)
 
-            Text("Enter your email and we'll send you a link to reset your password.")
+            Text("Enter your email and we'll send a 6-digit code to reset your password.")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
                 .padding(.top, 14)
@@ -451,18 +465,14 @@ struct OnboardingView: View {
                     .foregroundStyle(Theme.Color.accent)
                     .padding(.top, 16)
 
-                #if DEBUG
-                if let devResetToken {
-                    Text("Dev reset token: \(devResetToken)")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .padding(.top, 8)
-                }
-                #endif
+                Text("Code expires in 10 minutes.")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .padding(.top, 8)
             }
 
             Button(action: { Task { await submitForgotPassword() } }) {
-                Text(isSaving ? "Sending…" : (forgotPasswordMessage == nil ? "Send Reset Link" : "Resend Link"))
+                Text(forgotResendButtonTitle)
                     .font(.system(size: 17, weight: .bold, design: .rounded))
                     .foregroundStyle(Theme.Color.accentInk)
                     .frame(maxWidth: .infinity)
@@ -470,12 +480,12 @@ struct OnboardingView: View {
                     .background(Theme.Color.accent, in: Capsule())
             }
             .buttonStyle(.plain)
-            .disabled(isSaving || !forgotPasswordEmail.contains("@"))
-            .opacity(forgotPasswordEmail.contains("@") ? 1 : 0.45)
+            .disabled(isSaving || !forgotPasswordEmail.contains("@") || forgotResendCooldownRemaining > 0)
+            .opacity(forgotPasswordEmail.contains("@") && forgotResendCooldownRemaining == 0 ? 1 : 0.45)
             .padding(.top, 24)
 
             if forgotPasswordMessage != nil {
-                Button(action: { openResetPassword(prefillToken: devResetToken) }) {
+                Button(action: { openResetPassword() }) {
                     Text("Enter reset code")
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.75))
@@ -506,8 +516,25 @@ struct OnboardingView: View {
                 .padding(.top, 14)
 
             VStack(spacing: 12) {
-                registerField("Reset code", text: $resetToken)
-                    .textInputAutocapitalization(.never)
+                TextField("", text: $resetCode, prompt: Text("000000").foregroundColor(.white.opacity(0.35)))
+                    .keyboardType(.numberPad)
+                    .textContentType(.oneTimeCode)
+                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .tracking(8)
+                    .padding(.vertical, 16)
+                    .padding(.horizontal, 18)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.md)
+                            .stroke(Theme.Color.accent.opacity(0.45), lineWidth: 1)
+                    )
+                    .onChange(of: resetCode) { _, newValue in
+                        let digits = newValue.filter(\.isNumber)
+                        resetCode = String(digits.prefix(6))
+                    }
+
                 passwordField(
                     "New password (8+ characters)",
                     text: $resetPassword,
@@ -694,15 +721,9 @@ struct OnboardingView: View {
     // MARK: Register
 
     private var registerBody: some View {
-        Group {
-            if showingEmailCodeEntry {
-                emailCodeEntryBody
-            } else {
-                registerOptionsBody
-            }
-        }
-        .padding(.horizontal, 28)
-        .opacity(appeared ? 1 : 0)
+        registerOptionsBody
+            .padding(.horizontal, 28)
+            .opacity(appeared ? 1 : 0)
     }
 
     private var registerOptionsBody: some View {
@@ -710,7 +731,9 @@ struct OnboardingView: View {
             Spacer()
             (
                 Text("Register your account\n").foregroundStyle(.white)
-                + Text("to save these settings").foregroundStyle(.white.opacity(0.45))
+                + (role == .client
+                    ? Text("to join your trainer").foregroundStyle(.white.opacity(0.45))
+                    : Text("to save these settings").foregroundStyle(.white.opacity(0.45)))
             )
             .font(.system(size: 36, weight: .black))
             .fontWidth(.condensed)
@@ -832,26 +855,10 @@ struct OnboardingView: View {
                 .foregroundStyle(Theme.Color.accent)
                 .padding(.top, 14)
 
-            #if DEBUG
-            if let devCodeHint {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Development mode", systemImage: "hammer.fill")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Color.accent)
-                    Text("Real emails are not sent yet. Use this code: \(devCodeHint)")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.65))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(Theme.Color.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.md)
-                        .stroke(Theme.Color.accent.opacity(0.35), lineWidth: 1)
-                )
-                .padding(.top, 16)
-            }
-            #endif
+            Text("Code expires in 10 minutes.")
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.45))
+                .padding(.top, 8)
 
             TextField("", text: $verificationCode, prompt: Text("000000").foregroundColor(.white.opacity(0.35)))
                 .keyboardType(.numberPad)
@@ -896,7 +903,7 @@ struct OnboardingView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 15, weight: .semibold))
-                    Text(isSaving ? "Sending…" : "Resend Code")
+                    Text(resendButtonTitle)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                 }
                 .foregroundStyle(.white)
@@ -906,7 +913,8 @@ struct OnboardingView: View {
                 .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
             }
             .buttonStyle(.plain)
-            .disabled(isSaving)
+            .disabled(isSaving || resendCooldownRemaining > 0)
+            .opacity(resendCooldownRemaining > 0 ? 0.45 : 1)
             .padding(.top, 12)
 
             Spacer()
@@ -919,15 +927,19 @@ struct OnboardingView: View {
     private var bottomBar: some View {
         switch current {
         case .register:
-            // Register has its own buttons; only a small back control here.
             HStack {
-                if !isFirst { backButton }
+                if !isFirst || showingEmailCodeEntry { backButton }
                 Spacer()
             }
         case .hello:
             controlRow(label: "I'M READY")
         case .invite:
-            if showingLogin || showingForgotPassword || showingResetPassword {
+            if showingEmailCodeEntry {
+                HStack {
+                    backButton
+                    Spacer()
+                }
+            } else if showingLogin || showingForgotPassword || showingResetPassword {
                 HStack {
                     backButton
                     Spacer()
@@ -1004,6 +1016,17 @@ struct OnboardingView: View {
 
     private func advance() {
         guard canAdvance else { return }
+        if case .invite = current {
+            let code = inviteCode.trimmingCharacters(in: .whitespaces)
+            if !code.isEmpty {
+                Task { await validateInviteAndAdvance() }
+                return
+            }
+        }
+        advanceToNextScreen()
+    }
+
+    private func advanceToNextScreen() {
         if index >= screens.count - 1 {
             finish()
         } else {
@@ -1015,7 +1038,34 @@ struct OnboardingView: View {
         }
     }
 
+    @MainActor
+    private func validateInviteAndAdvance() async {
+        guard !isSaving else { return }
+        isSaving = true
+        saveError = nil
+        defer { isSaving = false }
+
+        do {
+            let code = inviteCode.trimmingCharacters(in: .whitespaces)
+            let response = try await VerraAPI.validateInvite(code: code)
+            guard response.valid else {
+                saveError = response.message ?? "Invalid or expired invite code"
+                return
+            }
+            advanceToNextScreen()
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
     private func goBack() {
+        if showingEmailCodeEntry {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showingEmailCodeEntry = false
+                verificationCode = ""
+            }
+            return
+        }
         if case .invite = current, showingResetPassword {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 showingResetPassword = false
@@ -1029,7 +1079,7 @@ struct OnboardingView: View {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 showingForgotPassword = false
                 forgotPasswordMessage = nil
-                devResetToken = nil
+                forgotResendCooldownRemaining = 0
                 showingLogin = true
             }
             return
@@ -1040,13 +1090,6 @@ struct OnboardingView: View {
                 showingLoginEmailFields = false
                 loginEmail = ""
                 loginPassword = ""
-            }
-            return
-        }
-        if case .register = current, showingEmailCodeEntry {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                showingEmailCodeEntry = false
-                verificationCode = ""
             }
             return
         }
@@ -1072,23 +1115,29 @@ struct OnboardingView: View {
     }
 
     private var canSubmitResetPassword: Bool {
-        !resetToken.trimmingCharacters(in: .whitespaces).isEmpty
+        resetCode.count == 6
             && resetPassword.count >= 8
             && resetPassword == resetPasswordConfirm
+    }
+
+    private var forgotResendButtonTitle: String {
+        if isSaving { return "Sending…" }
+        if forgotResendCooldownRemaining > 0 { return "Resend in \(forgotResendCooldownRemaining)s" }
+        return forgotPasswordMessage == nil ? "Send Reset Code" : "Resend Code"
     }
 
     private func openForgotPassword() {
         forgotPasswordEmail = loginEmail
         forgotPasswordMessage = nil
-        devResetToken = nil
+        forgotResendCooldownRemaining = 0
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             showingLogin = false
             showingForgotPassword = true
         }
     }
 
-    private func openResetPassword(prefillToken: String? = nil) {
-        resetToken = prefillToken ?? devResetToken ?? ""
+    private func openResetPassword() {
+        resetCode = ""
         resetPassword = ""
         resetPasswordConfirm = ""
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -1099,9 +1148,22 @@ struct OnboardingView: View {
     }
 
     private func clearResetPasswordFields() {
-        resetToken = ""
+        resetCode = ""
         resetPassword = ""
         resetPasswordConfirm = ""
+    }
+
+    private func startForgotResendCooldown(seconds: Int) {
+        forgotResendCooldownRemaining = max(0, seconds)
+        guard seconds > 0 else { return }
+        Task {
+            for remaining in stride(from: seconds - 1, through: 0, by: -1) {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await MainActor.run {
+                    forgotResendCooldownRemaining = remaining
+                }
+            }
+        }
     }
 
     private var canSubmitEmail: Bool {
@@ -1192,12 +1254,7 @@ struct OnboardingView: View {
             }
 
             if response.requiresEmailVerification {
-                verificationEmail = response.email
-                devCodeHint = response.devCode
-                verificationCode = ""
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    showingEmailCodeEntry = true
-                }
+                presentEmailVerification(email: response.email)
                 return
             }
 
@@ -1224,7 +1281,18 @@ struct OnboardingView: View {
                 onComplete: { name in onFinish(name, "") }
             )
         } catch {
-            saveError = error.localizedDescription
+            let message = error.localizedDescription
+            let email = registerEmail.trimmingCharacters(in: .whitespaces).lowercased()
+            if message.localizedCaseInsensitiveContains("email already registered") {
+                saveError = "This email is already in use. Log in, or use the same password you signed up with to get a new verification code."
+            } else if message.localizedCaseInsensitiveContains("verify your email")
+                || message.localizedCaseInsensitiveContains("wait")
+                || message.localizedCaseInsensitiveContains("seconds") {
+                presentEmailVerification(email: email)
+                saveError = message
+            } else {
+                saveError = message
+            }
         }
     }
 
@@ -1236,7 +1304,10 @@ struct OnboardingView: View {
         defer { isSaving = false }
 
         do {
-            let auth = try await VerraAPI.verifyEmail(email: verificationEmail, code: verificationCode)
+            let auth = try await VerraAPI.verifyEmail(
+                email: verificationEmail,
+                code: verificationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
             try await OnboardingAuthService.complete(
                 role: role,
                 auth: auth,
@@ -1244,7 +1315,12 @@ struct OnboardingView: View {
                 onComplete: { name in onFinish(name, "") }
             )
         } catch {
-            saveError = error.localizedDescription
+            let message = error.localizedDescription
+            if message.localizedCaseInsensitiveContains("already verified") {
+                redirectToLoginAfterVerification(message: message)
+            } else {
+                saveError = message
+            }
         }
     }
 
@@ -1257,10 +1333,27 @@ struct OnboardingView: View {
 
         do {
             let response = try await VerraAPI.resendVerificationEmail(email: verificationEmail)
-            devCodeHint = response.devCode
+            if response.alreadyVerified == true {
+                redirectToLoginAfterVerification(message: response.message)
+                return
+            }
+            startResendCooldown(seconds: response.retryAfterSeconds ?? 60)
+            successMessage = response.message
         } catch {
             saveError = error.localizedDescription
         }
+    }
+
+    private func redirectToLoginAfterVerification(message: String) {
+        loginEmail = verificationEmail
+        loginPassword = ""
+        verificationCode = ""
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            showingEmailCodeEntry = false
+            showingLogin = true
+            showingLoginEmailFields = true
+        }
+        successMessage = message
     }
 
     @MainActor
@@ -1274,7 +1367,7 @@ struct OnboardingView: View {
         do {
             let response = try await VerraAPI.requestPasswordReset(email: email)
             forgotPasswordMessage = response.message
-            devResetToken = response.resetToken
+            startForgotResendCooldown(seconds: response.retryAfterSeconds ?? 60)
         } catch {
             saveError = error.localizedDescription
         }
@@ -1288,11 +1381,13 @@ struct OnboardingView: View {
         defer { isSaving = false }
 
         do {
+            let email = forgotPasswordEmail.trimmingCharacters(in: .whitespaces).lowercased()
             let response = try await VerraAPI.resetPassword(
-                token: resetToken.trimmingCharacters(in: .whitespaces),
+                email: email,
+                code: resetCode,
                 newPassword: resetPassword
             )
-            loginEmail = forgotPasswordEmail.isEmpty ? loginEmail : forgotPasswordEmail
+            loginEmail = email
             loginPassword = ""
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 showingResetPassword = false
@@ -1301,7 +1396,7 @@ struct OnboardingView: View {
                 showingLoginEmailFields = true
                 clearResetPasswordFields()
                 forgotPasswordMessage = nil
-                devResetToken = nil
+                forgotResendCooldownRemaining = 0
             }
             successMessage = response.message
         } catch {
@@ -1321,7 +1416,42 @@ struct OnboardingView: View {
             let auth = try await VerraAPI.login(email: email, password: loginPassword)
             try finishLogin(auth: auth)
         } catch {
-            saveError = error.localizedDescription
+            let message = error.localizedDescription
+            if message.localizedCaseInsensitiveContains("verify your email") {
+                let email = loginEmail.trimmingCharacters(in: .whitespaces).lowercased()
+                presentEmailVerification(email: email)
+            } else {
+                saveError = message
+            }
+        }
+    }
+
+    private var resendButtonTitle: String {
+        if isSaving { return "Sending…" }
+        if resendCooldownRemaining > 0 { return "Resend in \(resendCooldownRemaining)s" }
+        return "Resend Code"
+    }
+
+    private func presentEmailVerification(email: String) {
+        verificationEmail = email
+        verificationCode = ""
+        startResendCooldown(seconds: 60)
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            showingLogin = false
+            showingEmailCodeEntry = true
+        }
+    }
+
+    private func startResendCooldown(seconds: Int) {
+        resendCooldownRemaining = max(0, seconds)
+        guard seconds > 0 else { return }
+        Task {
+            for remaining in stride(from: seconds - 1, through: 0, by: -1) {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await MainActor.run {
+                    resendCooldownRemaining = remaining
+                }
+            }
         }
     }
 
@@ -1376,14 +1506,7 @@ struct OnboardingView: View {
     }
 
     private func finish() {
-        switch role {
-        case .trainer:
-            break
-        case .client:
-            if inviteCode.trimmingCharacters(in: .whitespaces).isEmpty {
-                onFinish("", "")
-            }
-        }
+        // Onboarding completes through register / login / email verification — not by advancing past the last screen.
     }
 
     private func headlineText(_ segs: [Seg], size: CGFloat = 34) -> some View {

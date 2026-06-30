@@ -51,8 +51,27 @@ SES_FROM_NAME=Verra
 **AWS setup checklist:**
 
 1. Verify your sender email or domain in the SES console
-2. Create an IAM user with `ses:SendEmail` permission
-3. If your SES account is in **sandbox mode**, also verify each recipient email you test with
+2. Create an IAM user with permission to send email. Attach this policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ses:SendEmail",
+        "ses:SendRawEmail"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+Use the access key / secret from that IAM user in `.env` (not the root account keys).
+
+3. Verify your sender email or domain in the SES console **in the same region** as `AWS_REGION` (e.g. `eu-north-1`).
 4. Add the credentials to `.env` and restart the server
 
 Without SES configured, development mode logs email content to the terminal and the API may return `devCode` for local testing.

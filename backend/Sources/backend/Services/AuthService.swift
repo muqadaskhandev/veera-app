@@ -17,8 +17,23 @@ enum AuthService {
         try await assertRoleAllowed(role, adminSetupSecret: adminSetupSecret)
 
         let normalizedEmail = email.lowercased()
-        if try await User.query(on: request.db).filter(\.$email == normalizedEmail).first() != nil {
-            throw Abort(.conflict, reason: "Email already registered")
+        if let existing = try await User.query(on: request.db).filter(\.$email == normalizedEmail).first() {
+            if existing.isEmailVerified {
+                throw Abort(.conflict, reason: "Email already registered")
+            }
+            guard existing.role == role.rawValue else {
+                throw Abort(.conflict, reason: "Email already registered")
+            }
+            guard let passwordHash = existing.passwordHash,
+                  try Bcrypt.verify(password, created: passwordHash) else {
+                throw Abort(.conflict, reason: "Email already registered")
+            }
+            let userID = try existing.requireID()
+            if try await canIssueVerificationCode(for: userID, on: request.db) {
+                let code = try await EmailVerificationService.issueCode(for: existing, on: request.db)
+                EmailVerificationService.queueVerificationEmail(to: normalizedEmail, code: code, on: request.application)
+            }
+            return .pending(email: normalizedEmail)
         }
 
         let user = User(
@@ -40,11 +55,8 @@ enum AuthService {
         }
 
         let code = try await EmailVerificationService.issueCode(for: user, on: request.db)
-        try await EmailVerificationService.sendVerificationCode(to: normalizedEmail, code: code, on: request)
-
-        let isDevelopment = request.application.environment == .development
-        let sesConfigured = SESEmailService.isConfigured()
-        return .pending(email: normalizedEmail, devCode: (isDevelopment && !sesConfigured) ? code : nil)
+        EmailVerificationService.queueVerificationEmail(to: normalizedEmail, code: code, on: request.application)
+        return .pending(email: normalizedEmail)
     }
 
     static func verifyEmail(code: String, email: String, on request: Request) async throws -> AuthTokenResponse {
@@ -55,19 +67,29 @@ enum AuthService {
     static func resendVerificationEmail(email: String, on request: Request) async throws -> ResendVerificationResponse {
         let normalizedEmail = email.lowercased()
         guard let user = try await User.query(on: request.db).filter(\.$email == normalizedEmail).first() else {
-            return ResendVerificationResponse(message: "If that email exists, a new code was sent.", devCode: nil)
+            return ResendVerificationResponse(
+                message: "If that email exists, a new code was sent.",
+                retryAfterSeconds: nil,
+                alreadyVerified: false
+            )
         }
         guard !user.isEmailVerified else {
-            return ResendVerificationResponse(message: "Email is already verified.", devCode: nil)
+            return ResendVerificationResponse(
+                message: "Your email is already verified. Please log in.",
+                retryAfterSeconds: nil,
+                alreadyVerified: true
+            )
         }
 
+        let userID = try user.requireID()
+        try await EmailVerificationService.assertResendAllowed(for: userID, on: request.db)
+
         let code = try await EmailVerificationService.issueCode(for: user, on: request.db)
-        try await EmailVerificationService.sendVerificationCode(to: normalizedEmail, code: code, on: request)
-        let isDevelopment = request.application.environment == .development
-        let sesConfigured = SESEmailService.isConfigured()
+        EmailVerificationService.queueVerificationEmail(to: normalizedEmail, code: code, on: request.application)
         return ResendVerificationResponse(
             message: "If that email exists, a new code was sent.",
-            devCode: (isDevelopment && !sesConfigured) ? code : nil
+            retryAfterSeconds: Int(EmailVerificationService.resendCooldown),
+            alreadyVerified: false
         )
     }
 
@@ -83,7 +105,7 @@ enum AuthService {
             throw Abort(.unauthorized, reason: "Invalid email or password")
         }
         guard user.isEmailVerified else {
-            throw Abort(.forbidden, reason: "Please verify your email before signing in")
+            throw Abort(.forbidden, reason: "Please verify your email with the 6-digit code before signing in.")
         }
         return try await TokenService.issueTokens(for: user, on: request)
     }
@@ -194,73 +216,44 @@ enum AuthService {
         let normalizedEmail = email.lowercased()
         guard let user = try await User.query(on: request.db).filter(\.$email == normalizedEmail).first(),
               user.passwordHash != nil else {
-            return PasswordResetRequestedResponse(message: "If that email exists, a reset link was sent.")
+            return PasswordResetRequestedResponse(
+                message: "If that email exists, a 6-digit reset code was sent.",
+                retryAfterSeconds: nil
+            )
         }
 
-        let rawToken = [UInt8].random(count: 32).base64
-        let tokenHash = SHA256.hash(data: Data(rawToken.utf8)).hex
-        let reset = PasswordResetToken(
-            userID: try user.requireID(),
-            tokenHash: tokenHash,
-            expiresAt: Date().addingTimeInterval(60 * 60)
-        )
-        try await reset.save(on: request.db)
+        let userID = try user.requireID()
+        try await PasswordResetService.assertResendAllowed(for: userID, on: request.db)
 
-        let resetBase = Environment.get("PASSWORD_RESET_URL") ?? "https://verraos.app/reset-password"
-        let encodedToken = rawToken.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? rawToken
-        let resetLink = "\(resetBase)?token=\(encodedToken)"
-        let subject = "Reset your Verra password"
-        let textBody = """
-        We received a request to reset your Verra password.
+        let code = try await PasswordResetService.issueCode(for: user, on: request.db)
+        PasswordResetService.queueResetEmail(to: normalizedEmail, code: code, on: request.application)
 
-        Open this link to choose a new password:
-        \(resetLink)
-
-        This link expires in 1 hour.
-        If you did not request this, you can ignore this email.
-        """
-        let htmlBody = """
-        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111;">
-          <p>We received a request to reset your Verra password.</p>
-          <p><a href="\(resetLink)" style="color:#1a7f37;font-weight:600;">Reset your password</a></p>
-          <p style="color:#555;">This link expires in 1 hour.</p>
-          <p style="color:#555;">If you did not request this, you can ignore this email.</p>
-        </div>
-        """
-        try await SESEmailService.send(
-            to: normalizedEmail,
-            subject: subject,
-            textBody: textBody,
-            htmlBody: htmlBody,
-            on: request
-        )
-
-        let isDevelopment = request.application.environment == .development
-        let sesConfigured = SESEmailService.isConfigured()
         return PasswordResetRequestedResponse(
-            message: "If that email exists, a reset link was sent.",
-            resetToken: (isDevelopment && !sesConfigured) ? rawToken : nil
+            message: "If that email exists, a 6-digit reset code was sent.",
+            retryAfterSeconds: Int(PasswordResetService.resendCooldown)
         )
     }
 
-    static func resetPassword(token: String, newPassword: String, on request: Request) async throws -> MessageResponse {
+    static func resetPassword(email: String, code: String, newPassword: String, on request: Request) async throws -> MessageResponse {
         try validatePassword(newPassword)
-        let tokenHash = SHA256.hash(data: Data(token.utf8)).hex
-
-        guard let reset = try await PasswordResetToken.query(on: request.db)
-            .filter(\.$tokenHash == tokenHash)
-            .first(),
-            reset.isValid else {
-            throw Abort(.badRequest, reason: "Invalid or expired reset token")
-        }
-
-        let user = try await reset.$user.get(on: request.db)
-        user.passwordHash = try Bcrypt.hash(newPassword)
-        reset.usedAt = Date()
-        try await user.save(on: request.db)
-        try await reset.save(on: request.db)
-
+        _ = try await PasswordResetService.resetPassword(
+            email: email,
+            code: code,
+            newPassword: newPassword,
+            on: request.db
+        )
         return MessageResponse(message: "Password updated successfully")
+    }
+
+    private static func canIssueVerificationCode(for userID: UUID, on database: any Database) async throws -> Bool {
+        guard let latest = try await EmailVerificationCode.query(on: database)
+            .filter(\.$user.$id == userID)
+            .sort(\.$createdAt, .descending)
+            .first(),
+            let createdAt = latest.createdAt else {
+            return true
+        }
+        return Date().timeIntervalSince(createdAt) >= EmailVerificationService.resendCooldown
     }
 
     private static func createTrainerProfile(for user: User, on database: any Database) async throws {
@@ -314,7 +307,7 @@ enum AuthService {
         on request: Request
     ) async throws {
         guard let inviteCode, !inviteCode.isEmpty else {
-            throw Abort(.badRequest, reason: "Invite code is required for client registration")
+            return
         }
         try await linkClientToInvite(
             user: user,
@@ -386,21 +379,18 @@ struct ForgotPasswordRequest: Content {
 }
 
 struct ResetPasswordRequest: Content {
-    var token: String
+    var email: String
+    var code: String
     var newPassword: String
 }
 
 struct PasswordResetRequestedResponse: Content {
     let message: String
-    var resetToken: String?
+    let retryAfterSeconds: Int?
 }
 
 struct MessageResponse: Content {
     let message: String
-}
-
-private extension Sequence where Element == UInt8 {
-    var base64: String { Data(self).base64EncodedString() }
 }
 
 private extension SHA256.Digest {

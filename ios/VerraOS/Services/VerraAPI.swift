@@ -40,12 +40,13 @@ struct RegisterResponse: Codable {
 
 struct ResendVerificationResponse: Codable {
     let message: String
-    let devCode: String?
+    let retryAfterSeconds: Int?
+    let alreadyVerified: Bool?
 }
 
 struct PasswordResetRequestedResponse: Codable {
     let message: String
-    let resetToken: String?
+    let retryAfterSeconds: Int?
 }
 
 struct MessageResponse: Codable {
@@ -100,7 +101,8 @@ enum VerraAPI {
     }
 
     struct ResetPasswordBody: Encodable {
-        let token: String
+        let email: String
+        let code: String
         let newPassword: String
     }
 
@@ -112,11 +114,11 @@ enum VerraAPI {
         )
     }
 
-    static func resetPassword(token: String, newPassword: String) async throws -> MessageResponse {
+    static func resetPassword(email: String, code: String, newPassword: String) async throws -> MessageResponse {
         try await APIClient.shared.request(
             "/api/auth/password/reset",
             method: "POST",
-            body: ResetPasswordBody(token: token, newPassword: newPassword)
+            body: ResetPasswordBody(email: email, code: code, newPassword: newPassword)
         )
     }
 

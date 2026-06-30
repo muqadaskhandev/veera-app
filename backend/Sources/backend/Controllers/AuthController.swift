@@ -109,7 +109,12 @@ struct AuthController: RouteCollection {
     @Sendable
     func resetPassword(req: Request) async throws -> MessageResponse {
         let payload = try req.content.decode(ResetPasswordRequest.self)
-        return try await AuthService.resetPassword(token: payload.token, newPassword: payload.newPassword, on: req)
+        return try await AuthService.resetPassword(
+            email: payload.email,
+            code: payload.code,
+            newPassword: payload.newPassword,
+            on: req
+        )
     }
 
     @Sendable

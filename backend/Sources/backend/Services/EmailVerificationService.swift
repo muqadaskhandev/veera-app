@@ -3,7 +3,22 @@ import Fluent
 import Vapor
 
 enum EmailVerificationService {
-  private static let codeLifetime: TimeInterval = 60 * 15
+  static let codeLifetime: TimeInterval = 60 * 10
+  static let resendCooldown: TimeInterval = 60
+
+  static func assertResendAllowed(for userID: UUID, on database: any Database) async throws {
+    guard let latest = try await EmailVerificationCode.query(on: database)
+      .filter(\.$user.$id == userID)
+      .sort(\.$createdAt, .descending)
+      .first(),
+      let createdAt = latest.createdAt else {
+      return
+    }
+    let elapsed = Date().timeIntervalSince(createdAt)
+    guard elapsed < resendCooldown else { return }
+    let retry = Int(ceil(resendCooldown - elapsed))
+    throw Abort(.tooManyRequests, reason: "Please wait \(retry) seconds before requesting a new code.")
+  }
 
   static func issueCode(for user: User, on database: any Database) async throws -> String {
     let code = String(format: "%06d", Int.random(in: 0...999_999))
@@ -30,18 +45,22 @@ enum EmailVerificationService {
   }
 
   static func sendVerificationCode(to email: String, code: String, on request: Request) async throws {
+    try await sendVerificationCode(to: email, code: code, on: request.application)
+  }
+
+  static func sendVerificationCode(to email: String, code: String, on app: Application) async throws {
     let subject = "Your Verra verification code"
     let textBody = """
     Your Verra verification code is: \(code)
 
-    This code expires in 15 minutes.
+    This code expires in 10 minutes.
     If you did not request this, you can ignore this email.
     """
     let htmlBody = """
     <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111;">
       <p>Your Verra verification code is:</p>
       <p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:16px 0;">\(code)</p>
-      <p style="color:#555;">This code expires in 15 minutes.</p>
+      <p style="color:#555;">This code expires in 10 minutes.</p>
       <p style="color:#555;">If you did not request this, you can ignore this email.</p>
     </div>
     """
@@ -51,8 +70,18 @@ enum EmailVerificationService {
       subject: subject,
       textBody: textBody,
       htmlBody: htmlBody,
-      on: request
+      on: app
     )
+  }
+
+  static func queueVerificationEmail(to email: String, code: String, on app: Application) {
+    Task {
+      do {
+        try await sendVerificationCode(to: email, code: code, on: app)
+      } catch {
+        app.logger.error("Verification email delivery failed: \(error)")
+      }
+    }
   }
 
   static func verify(code: String, email: String, on database: any Database) async throws -> User {
@@ -64,7 +93,19 @@ enum EmailVerificationService {
       throw Abort(.forbidden, reason: "Account is inactive")
     }
 
-    let codeHash = SHA256.hash(data: Data(code.utf8)).hex
+    let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
+    let codeHash = SHA256.hash(data: Data(normalizedCode.utf8)).hex
+
+    if user.isEmailVerified {
+      if try await EmailVerificationCode.query(on: database)
+        .filter(\.$user.$id == user.id!)
+        .filter(\.$codeHash == codeHash)
+        .first() != nil {
+        return user
+      }
+      throw Abort(.badRequest, reason: "Email already verified. Please log in.")
+    }
+
     guard let record = try await EmailVerificationCode.query(on: database)
       .filter(\.$user.$id == user.id!)
       .filter(\.$codeHash == codeHash)
@@ -96,12 +137,12 @@ struct RegisterResponse: Content {
   let expiresIn: Int?
   let user: UserDTO?
 
-  static func pending(email: String, devCode: String?) -> RegisterResponse {
+  static func pending(email: String) -> RegisterResponse {
     RegisterResponse(
       requiresEmailVerification: true,
       email: email,
       message: "We sent a 6-digit code to your email.",
-      devCode: devCode,
+      devCode: nil,
       accessToken: nil,
       refreshToken: nil,
       expiresIn: nil,
@@ -134,5 +175,6 @@ struct ResendVerificationRequest: Content {
 
 struct ResendVerificationResponse: Content {
   let message: String
-  let devCode: String?
+  let retryAfterSeconds: Int?
+  let alreadyVerified: Bool
 }

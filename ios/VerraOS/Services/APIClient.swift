@@ -19,6 +19,25 @@ enum APIError: LocalizedError {
 struct APIClient {
     static let shared = APIClient()
 
+    private static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            let withFractional = ISO8601DateFormatter()
+            withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = withFractional.date(from: value) { return date }
+            let withoutFractional = ISO8601DateFormatter()
+            withoutFractional.formatOptions = [.withInternetDateTime]
+            if let date = withoutFractional.date(from: value) { return date }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid ISO8601 date: \(value)"
+            )
+        }
+        return decoder
+    }()
+
     func request<T: Decodable>(
         _ path: String,
         method: String = "GET",
@@ -47,13 +66,13 @@ struct APIClient {
 
         if (200..<300).contains(http.statusCode) {
             do {
-                return try JSONDecoder().decode(T.self, from: data)
+                return try Self.decoder.decode(T.self, from: data)
             } catch {
                 throw APIError.decoding(error)
             }
         }
 
-        if let apiError = try? JSONDecoder().decode(APIErrorResponse.self, from: data) {
+        if let apiError = try? Self.decoder.decode(APIErrorResponse.self, from: data) {
             throw APIError.server(apiError.reason)
         }
         let fallback = String(data: data, encoding: .utf8) ?? "Request failed"

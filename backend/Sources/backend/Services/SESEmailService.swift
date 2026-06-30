@@ -43,13 +43,17 @@ enum SESEmailService {
         htmlBody: String? = nil,
         on request: Request
     ) async throws {
+        try await send(to: recipient, subject: subject, textBody: textBody, htmlBody: htmlBody, on: request.application)
+    }
+
+    static func send(
+        to recipient: String,
+        subject: String,
+        textBody: String,
+        htmlBody: String? = nil,
+        on app: Application
+    ) async throws {
         guard let config = Configuration.load() else {
-            if request.application.environment == .development {
-                request.logger.warning("[DEV] SES not configured — email not sent to \(recipient)")
-                request.logger.warning("[DEV] Subject: \(subject)")
-                request.logger.warning("[DEV] Body: \(textBody)")
-                return
-            }
             throw Abort(.internalServerError, reason: "Email service is not configured")
         }
 
@@ -90,7 +94,7 @@ enum SESEmailService {
             credentials: config.credentials
         )
 
-        let response = try await request.client.post(URI(string: endpoint.absoluteString)) { clientRequest in
+        let response = try await app.client.post(URI(string: endpoint.absoluteString)) { clientRequest in
             clientRequest.headers.replaceOrAdd(name: .contentType, value: "application/json")
             clientRequest.headers.replaceOrAdd(name: .init("host"), value: endpoint.host!)
             clientRequest.headers.replaceOrAdd(name: .init("x-amz-date"), value: signed.amzDate)
@@ -105,10 +109,10 @@ enum SESEmailService {
 
         guard (200 ... 299).contains(response.status.code) else {
             let responseBody = response.body.flatMap { String(buffer: $0) } ?? ""
-            request.logger.error("SES send failed (\(response.status.code)): \(responseBody)")
+            app.logger.error("SES send failed (\(response.status.code)): \(responseBody)")
             throw Abort(.internalServerError, reason: "Failed to send email")
         }
 
-        request.logger.info("SES email sent to \(recipient)")
+        app.logger.info("SES email sent to \(recipient)")
     }
 }
