@@ -12,6 +12,7 @@ func routes(_ app: Application) throws {
     try app.register(collection: TrainerController())
     try app.register(collection: ClientController())
     try app.register(collection: ProfileController())
+    try app.register(collection: HealthController())
     try app.register(collection: SessionController())
 }
 

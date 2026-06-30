@@ -49,6 +49,10 @@ func configure(_ app: Application) async throws {
     app.migrations.add(AddProfileFields())
     app.migrations.add(CreateProfile())
     app.migrations.add(MigrateExistingProfiles())
+    app.migrations.add(CreateWearableConnection())
+    app.migrations.add(CreateHealthDailyMetrics())
+    app.migrations.add(CreateOuraToken())
+    app.migrations.add(CreateOuraOAuthState())
     app.migrations.add(SeedDefaultTrainer())
 
     try await app.autoMigrate()

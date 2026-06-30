@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var messages = MessageStore()
     @State private var notifications = NotificationStore()
     @State private var trainer = TrainerStore()
+    @State private var healthData = HealthDataStore()
     @State private var showingSettings = false
     @State private var showingNotifications = false
     @State private var showingEditProfile = false
@@ -57,6 +58,7 @@ struct ContentView: View {
         .environment(messages)
         .environment(notifications)
         .environment(trainer)
+        .environment(healthData)
         .sheet(isPresented: $showingSettings) {
             SettingsHubView(
                 onLogOut: onLogOut,

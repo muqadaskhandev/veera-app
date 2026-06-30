@@ -260,4 +260,76 @@ enum VerraAPI {
             token: accessToken
         )
     }
+
+    static func syncHealth(
+        provider: String,
+        metrics: [HealthDailyMetricInput],
+        accessToken: String
+    ) async throws -> HealthMeResponse {
+        try await APIClient.shared.request(
+            "/api/health/sync",
+            method: "POST",
+            body: HealthSyncBody(provider: provider, metrics: metrics),
+            token: accessToken
+        )
+    }
+
+    static func fetchMyHealth(accessToken: String, days: Int = 30) async throws -> HealthMeResponse {
+        try await APIClient.shared.request(
+            "/api/health/me?days=\(days)",
+            token: accessToken
+        )
+    }
+
+    static func fetchClientHealth(clientID: UUID, accessToken: String, days: Int = 30) async throws -> HealthMeResponse {
+        try await APIClient.shared.request(
+            "/api/clients/\(clientID.uuidString)/health?days=\(days)",
+            token: accessToken
+        )
+    }
+
+    static func connectHealthProvider(provider: String, accessToken: String) async throws -> WearableConnectionDTO {
+        try await APIClient.shared.request(
+            "/api/health/connect",
+            method: "POST",
+            body: HealthConnectBody(provider: provider),
+            token: accessToken
+        )
+    }
+
+    static func disconnectHealthProvider(provider: String, accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/health/connect/\(provider)",
+            method: "DELETE",
+            token: accessToken
+        )
+    }
+
+    static func fetchOuraAuthorize(accessToken: String) async throws -> OuraAuthorizeResponse {
+        try await APIClient.shared.request("/api/health/oura/authorize", token: accessToken)
+    }
+
+    struct OuraCallbackBody: Encodable {
+        let code: String
+        let state: String
+    }
+
+    static func completeOuraOAuth(code: String, state: String, accessToken: String) async throws -> WearableConnectionDTO {
+        try await APIClient.shared.request(
+            "/api/health/oura/callback",
+            method: "POST",
+            body: OuraCallbackBody(code: code, state: state),
+            token: accessToken
+        )
+    }
+
+    static func syncOura(accessToken: String, days: Int = 30) async throws -> HealthMeResponse {
+        try await APIClient.shared.request(
+            "/api/health/oura/sync?days=\(days)",
+            method: "POST",
+            token: accessToken
+        )
+    }
 }
+
+private struct EmptyResponse: Decodable {}

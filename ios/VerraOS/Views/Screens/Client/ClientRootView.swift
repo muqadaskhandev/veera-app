@@ -64,6 +64,7 @@ struct ClientRootView: View {
     @State private var trainer = TrainerStore()
     @State private var account = ClientAccountStore()
     @State private var wearables = WearableConnectionStore()
+    @State private var healthData = HealthDataStore()
 
     @State private var tab: ClientTab = .dashboard
     @State private var isDrawerOpen = false
@@ -144,6 +145,7 @@ struct ClientRootView: View {
         .environment(messages)
         .environment(trainer)
         .environment(wearables)
+        .environment(healthData)
         .environment(account)
         .sheet(isPresented: $showingTrainerProfile) {
             ClientTrainerProfileView(profile: account.coachProfile)
@@ -174,6 +176,17 @@ struct ClientRootView: View {
         .task {
             await account.refreshFromServer()
             syncFromAccount()
+            await wearables.refreshFromServer()
+            if let clientID = account.client?.id {
+                await healthData.refreshForClient(clientID: clientID, trainerView: false)
+            }
+            await HealthBackgroundSync.syncOnLaunchIfNeeded(wearables: wearables, healthData: healthData)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .healthKitDataUpdated)) { _ in
+            Task {
+                guard wearables.isConnected(.appleHealth) else { return }
+                await wearables.syncNow(healthData: healthData)
+            }
         }
     }
 

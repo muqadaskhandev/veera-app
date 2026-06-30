@@ -18,5 +18,11 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Verra reads your sleep, steps, heart rate, and activity from Apple Health so your trainer can support your progress.</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.verra.health.sync</string>
+	</array>
 </dict>
 </plist>

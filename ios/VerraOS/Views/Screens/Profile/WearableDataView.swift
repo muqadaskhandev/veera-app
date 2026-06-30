@@ -42,12 +42,38 @@ struct WearableDataView: View {
     var connectionState: Bool? = nil
     var onBack: () -> Void
 
+    @Environment(HealthDataStore.self) private var healthData
+    @State private var timeframe: WearableTimeframe = .weekly
+
+    private var trainerView: Bool { connectionState == nil }
+
+    private var shouldShowCharts: Bool {
+        if connectionState == false { return false }
+        return healthData.hasMetrics
+    }
+
+    private var windowMetrics: [HealthDailyMetricDTO] {
+        healthData.metrics(for: timeframe)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ProfileTopBar(title: "Wearables", subtitle: client.name.firstWord, onBack: onBack)
             ScrollView(showsIndicators: false) {
                 VStack(spacing: Theme.Spacing.md) {
-                    noConnectionPrompt
+                    if healthData.isLoading && !healthData.hasMetrics {
+                        ProgressView()
+                            .padding(.vertical, 48)
+                    } else if shouldShowCharts {
+                        timeframePicker
+                        averagesRow
+                        sleepCard
+                        stepsCard
+                        heartCard
+                        hrvCard
+                    } else {
+                        noConnectionPrompt
+                    }
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.sm)
@@ -55,22 +81,130 @@ struct WearableDataView: View {
             }
         }
         .background(Theme.Color.background)
+        .task(id: "\(client.id)-\(trainerView)") {
+            await healthData.refreshForClient(clientID: client.id, trainerView: trainerView)
+        }
     }
 
-    // MARK: - No connection prompt
+    // MARK: - Timeframe
+
+    private var timeframePicker: some View {
+        HStack(spacing: 8) {
+            ForEach(WearableTimeframe.allCases) { option in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { timeframe = option }
+                } label: {
+                    Text(option.rawValue)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(timeframe == option ? Theme.Color.accentInk : Theme.Color.inkMuted)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 9)
+                        .background(
+                            timeframe == option ? Theme.Color.accent : Theme.Color.surfaceMuted,
+                            in: Capsule()
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: - Averages
+
+    private var averagesRow: some View {
+        HStack(spacing: 10) {
+            if let sleep = healthData.averageSleepMinutes(in: windowMetrics) {
+                AverageCell(
+                    label: "Sleep",
+                    value: formatSleep(sleep),
+                    caption: timeframe.avgLabel,
+                    tint: Color(hex: 0x7B61FF)
+                )
+            }
+            if let steps = healthData.averageSteps(in: windowMetrics) {
+                AverageCell(
+                    label: "Steps",
+                    value: formatSteps(steps),
+                    caption: timeframe.avgLabel,
+                    tint: Color(hex: 0x4C8DF5)
+                )
+            }
+        }
+    }
+
+    // MARK: - Charts
+
+    private var sleepCard: some View {
+        let values = windowMetrics.map { Double($0.sleepMinutes ?? 0) }
+        let latest = windowMetrics.last?.sleepMinutes ?? 0
+        return DynamicChartCard(
+            title: "Sleep",
+            icon: "moon.zzz.fill",
+            headline: formatSleep(latest),
+            unit: nil,
+            values: values,
+            tint: Color(hex: 0x7B61FF),
+            style: .bars
+        )
+    }
+
+    private var stepsCard: some View {
+        let values = windowMetrics.map { Double($0.steps ?? 0) }
+        let latest = windowMetrics.last?.steps ?? 0
+        return DynamicChartCard(
+            title: "Steps",
+            icon: "figure.walk",
+            headline: formatSteps(latest),
+            unit: nil,
+            values: values,
+            tint: Color(hex: 0x4C8DF5),
+            style: .bars
+        )
+    }
+
+    private var heartCard: some View {
+        let values = windowMetrics.map { Double($0.restingHR ?? 0) }
+        let latest = windowMetrics.last?.restingHR ?? 0
+        return DynamicChartCard(
+            title: "Resting HR",
+            icon: "heart.fill",
+            headline: "\(latest)",
+            unit: "bpm",
+            values: values,
+            tint: Color(hex: 0xFF2D55),
+            style: .line
+        )
+    }
+
+    private var hrvCard: some View {
+        let values = windowMetrics.map { $0.hrv ?? 0 }
+        let latest = windowMetrics.last?.hrv ?? 0
+        return DynamicChartCard(
+            title: "HRV",
+            icon: "waveform.path.ecg",
+            headline: String(format: "%.0f", latest),
+            unit: "ms",
+            values: values,
+            tint: Color(hex: 0x2BB673),
+            style: .line
+        )
+    }
+
+    // MARK: - Empty state
 
     private var noConnectionPrompt: some View {
         VStack(spacing: 12) {
             ZStack {
                 Circle().fill(Theme.Color.surfaceMuted).frame(width: 64, height: 64)
-                Image(systemName: "applewatch.slash")
+                Image(systemName: connectionState == false ? "applewatch.slash" : "chart.bar.xaxis")
                     .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(Theme.Color.inkFaint)
             }
-            Text("No data yet")
+            Text(connectionState == false ? "No data yet" : "No synced data")
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(Theme.Color.ink)
-            Text("Connect a wearable from the Wearables menu to start tracking your sleep, heart rate, and activity here.")
+            Text(emptyMessage)
                 .font(.system(size: 13.5, weight: .medium))
                 .foregroundStyle(Theme.Color.inkMuted)
                 .multilineTextAlignment(.center)
@@ -82,6 +216,29 @@ struct WearableDataView: View {
         .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.lg))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.lg).stroke(Theme.Color.hairline, lineWidth: 1))
         .padding(.top, Theme.Spacing.sm)
+    }
+
+    private var emptyMessage: String {
+        if connectionState == false {
+            return "Connect a wearable from the Wearables menu to start tracking your sleep, heart rate, and activity here."
+        }
+        if trainerView {
+            return "This client hasn't synced health data yet. Once they connect Apple Health and sync, their metrics will appear here."
+        }
+        return "Sync your connected device to see health metrics here."
+    }
+
+    private func formatSleep(_ minutes: Int) -> String {
+        let hours = minutes / 60
+        let mins = minutes % 60
+        return "\(hours)h \(mins)m"
+    }
+
+    private func formatSteps(_ steps: Int) -> String {
+        if steps >= 1000 {
+            return String(format: "%.1fk", Double(steps) / 1000)
+        }
+        return "\(steps)"
     }
 }
 
@@ -149,7 +306,7 @@ private struct DynamicChartCard: View {
                             .foregroundStyle(Theme.Color.inkMuted)
                     }
                     Spacer()
-                    Text("now")
+                    Text("latest")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Theme.Color.inkFaint)
                 }
@@ -208,7 +365,6 @@ private struct GradientBarChart: View {
         }
     }
 
-    /// Tighter spacing for dense monthly series.
     private var barSpacing: CGFloat { values.count > 14 ? 3 : 7 }
 }
 
@@ -239,14 +395,12 @@ private struct GradientLineChart: View {
         GeometryReader { geo in
             let pts = points(in: geo.size)
             ZStack {
-                // soft baseline
                 Path { p in
                     p.move(to: CGPoint(x: 0, y: geo.size.height - 1))
                     p.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height - 1))
                 }
                 .stroke(Theme.Color.hairline, lineWidth: 1)
 
-                // gradient fill
                 Path { p in
                     guard let first = pts.first else { return }
                     p.move(to: CGPoint(x: 0, y: geo.size.height))
@@ -263,7 +417,6 @@ private struct GradientLineChart: View {
                 )
                 .opacity(reveal)
 
-                // main line
                 Path { p in
                     guard let first = pts.first else { return }
                     p.move(to: first)
@@ -272,7 +425,6 @@ private struct GradientLineChart: View {
                 .trim(from: 0, to: reveal)
                 .stroke(tint, style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
 
-                // end dot
                 if let last = pts.last {
                     Circle()
                         .fill(Theme.Color.accent)
@@ -292,54 +444,5 @@ private struct GradientLineChart: View {
             reveal = 0
             withAnimation(.easeOut(duration: 0.7)) { reveal = 1 }
         }
-    }
-}
-
-// MARK: - Value bar chart (numbers shown)
-
-/// A 7-day bar chart that prints each day's actual number above its bar.
-private struct ValueBarChart: View {
-    let values: [Double]
-    var labels: [String]
-    var tint: Color
-    var height: CGFloat = 130
-
-    private var maxValue: Double { max(values.max() ?? 1, 0.001) }
-
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 7) {
-            ForEach(Array(values.enumerated()), id: \.offset) { index, value in
-                let isLast = index == values.count - 1
-                VStack(spacing: 6) {
-                    Text(compact(value))
-                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(isLast ? Theme.Color.ink : Theme.Color.inkMuted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(
-                            LinearGradient(
-                                colors: isLast
-                                    ? [Theme.Color.accent, Theme.Color.accent.opacity(0.7)]
-                                    : [tint.opacity(0.9), tint.opacity(0.45)],
-                                startPoint: .top, endPoint: .bottom
-                            )
-                        )
-                        .frame(height: max(6, CGFloat(value / maxValue) * height))
-                    Text(index < labels.count ? labels[index] : "")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.Color.inkFaint)
-                }
-                .frame(maxWidth: .infinity)
-            }
-        }
-    }
-
-    /// Compact thousands formatting, e.g. 8.4k.
-    private func compact(_ value: Double) -> String {
-        if value >= 1000 {
-            return String(format: "%.1fk", value / 1000)
-        }
-        return "\(Int(value))"
     }
 }

@@ -17,6 +17,19 @@ enum WearableDevice: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// v1 integrations shown in the connect list.
+    static var availableInV1: [WearableDevice] {
+        [.appleHealth, .oura]
+    }
+
+    var apiProvider: String {
+        switch self {
+        case .appleHealth, .appleWatch: return "apple_health"
+        case .oura: return "oura"
+        case .whoop, .garmin, .fitbit: return rawValue
+        }
+    }
+
     var name: String {
         switch self {
         case .appleHealth: return "Apple Health"
@@ -53,7 +66,7 @@ enum WearableDevice: String, CaseIterable, Identifiable {
     /// Short summary of what the trainer will receive from this device.
     var permissionSummary: String {
         switch self {
-        case .appleHealth: return "Sleep · Heart · Activity · Workouts"
+        case .appleHealth: return "Sleep · Steps · Heart · Activity · Workouts"
         case .appleWatch: return "Heart rate · Calories · Rings"
         case .whoop: return "Strain · Recovery · HRV"
         case .garmin: return "Steps · Sleep · Stress"
@@ -61,32 +74,30 @@ enum WearableDevice: String, CaseIterable, Identifiable {
         case .oura: return "Sleep · Readiness · HRV"
         }
     }
+
+    var requiresHealthKit: Bool {
+        self == .appleHealth
+    }
+
+    var requiresOuraOAuth: Bool {
+        self == .oura
+    }
 }
 
-/// Owns the client's wearable connection state for the demo session: which
-/// devices are linked and when data was last synced. Persisted to UserDefaults
-/// so connections survive app launches.
+/// Owns wearable connection state, HealthKit authorization, and server sync.
 @Observable
 final class WearableConnectionStore {
-    private static let connectedKey = "verra.client.wearables.connected.v1"
     private static let syncedKey = "verra.client.wearables.lastSynced.v1"
 
-    var connected: Set<WearableDevice> {
-        didSet { persist() }
-    }
+    var connected: Set<WearableDevice> = []
     var lastSynced: Date?
-    var isSyncing: Bool = false
+    var isSyncing = false
+    var pendingAppleHealthConnect = false
+    var lastSyncError: String?
 
     init() {
-        if let raw = UserDefaults.standard.array(forKey: Self.connectedKey) as? [String] {
-            connected = Set(raw.compactMap(WearableDevice.init(rawValue:)))
-        } else {
-            connected = []
-        }
         if let stored = UserDefaults.standard.object(forKey: Self.syncedKey) as? Date {
             lastSynced = stored
-        } else {
-            lastSynced = nil
         }
     }
 
@@ -96,30 +107,120 @@ final class WearableConnectionStore {
         connected.contains(device)
     }
 
-    /// Connects or disconnects a device, refreshing the synced timestamp on
-    /// connect.
-    func toggle(_ device: WearableDevice) {
-        if connected.contains(device) {
-            connected.remove(device)
-            if connected.isEmpty { lastSynced = nil }
-        } else {
-            connected.insert(device)
-            lastSynced = Date()
+    /// Loads connection state from the API after login.
+    @MainActor
+    func refreshFromServer() async {
+        guard let token = AuthStore.accessToken else { return }
+        do {
+            let response = try await VerraAPI.fetchMyHealth(accessToken: token)
+            connected = Set(response.connections.compactMap { dto in
+                WearableDevice.availableInV1.first { $0.apiProvider == dto.provider }
+            })
+            if let latest = response.connections.compactMap(\.lastSyncedAt).max() {
+                lastSynced = latest
+                UserDefaults.standard.set(latest, forKey: Self.syncedKey)
+            }
+        } catch {
+            // Offline — keep local state.
         }
     }
 
-    /// Simulates pulling fresh data from connected devices and stamps the time.
+    /// Connects or disconnects a device.
     @MainActor
-    func syncNow() async {
-        guard hasAnyConnection, !isSyncing else { return }
-        isSyncing = true
-        try? await Task.sleep(for: .seconds(1.1))
-        lastSynced = Date()
-        isSyncing = false
-        UserDefaults.standard.set(lastSynced, forKey: Self.syncedKey)
+    func toggle(_ device: WearableDevice) async throws {
+        guard WearableDevice.availableInV1.contains(device) else { return }
+
+        if connected.contains(device) {
+            try await disconnect(device)
+        } else if device.requiresHealthKit {
+            pendingAppleHealthConnect = true
+        } else if device.requiresOuraOAuth {
+            try await connectOura()
+        } else {
+            try await connect(device)
+        }
     }
 
-    /// A friendly relative description of the last sync time.
+    @MainActor
+    func confirmAppleHealthConnect() async throws {
+        pendingAppleHealthConnect = false
+        try await HealthKitService.requestAuthorization()
+        HealthKitBackgroundService.start()
+        try await connect(.appleHealth)
+    }
+
+    @MainActor
+    func cancelAppleHealthConnect() {
+        pendingAppleHealthConnect = false
+    }
+
+    @MainActor
+    private func connectOura() async throws {
+        guard let token = AuthStore.accessToken else { return }
+        try await OuraAuthService.connect(accessToken: token)
+        connected.insert(.oura)
+        lastSynced = Date()
+        persistLastSynced()
+    }
+
+    @MainActor
+    private func connect(_ device: WearableDevice) async throws {
+        guard let token = AuthStore.accessToken else { return }
+        _ = try await VerraAPI.connectHealthProvider(provider: device.apiProvider, accessToken: token)
+        connected.insert(device)
+        lastSynced = Date()
+        persistLastSynced()
+    }
+
+    @MainActor
+    private func disconnect(_ device: WearableDevice) async throws {
+        guard let token = AuthStore.accessToken else { return }
+        try await VerraAPI.disconnectHealthProvider(provider: device.apiProvider, accessToken: token)
+        connected.remove(device)
+        if connected.isEmpty {
+            lastSynced = nil
+            UserDefaults.standard.removeObject(forKey: Self.syncedKey)
+        }
+    }
+
+    /// Pulls data from connected providers and uploads to the API.
+    @MainActor
+    func syncNow(healthData: HealthDataStore) async {
+        guard hasAnyConnection, !isSyncing else { return }
+        guard let token = AuthStore.accessToken else { return }
+
+        isSyncing = true
+        lastSyncError = nil
+        defer { isSyncing = false }
+
+        do {
+            var latestResponse: HealthMeResponse?
+
+            if isConnected(.appleHealth) {
+                let daily = try await HealthKitService.fetchDailyMetrics(days: 30)
+                latestResponse = try await VerraAPI.syncHealth(
+                    provider: WearableDevice.appleHealth.apiProvider,
+                    metrics: daily.map(\.asSyncInput),
+                    accessToken: token
+                )
+            }
+
+            if isConnected(.oura) {
+                latestResponse = try await VerraAPI.syncOura(accessToken: token)
+            }
+
+            if let latestResponse {
+                healthData.metrics = latestResponse.metrics.sorted { $0.date < $1.date }
+                healthData.connections = latestResponse.connections
+                lastSynced = Date()
+                persistLastSynced()
+                HealthBackgroundSync.scheduleNextRefresh()
+            }
+        } catch {
+            lastSyncError = error.localizedDescription
+        }
+    }
+
     var lastSyncedLabel: String {
         guard let lastSynced else { return "Not synced yet" }
         let seconds = Int(Date().timeIntervalSince(lastSynced))
@@ -131,8 +232,7 @@ final class WearableConnectionStore {
         return "Synced \(lastSynced.formatted(.dateTime.month(.abbreviated).day()))"
     }
 
-    private func persist() {
-        UserDefaults.standard.set(connected.map(\.rawValue), forKey: Self.connectedKey)
+    private func persistLastSynced() {
         UserDefaults.standard.set(lastSynced, forKey: Self.syncedKey)
     }
 }
