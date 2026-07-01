@@ -7,15 +7,16 @@ enum AppleCredentialChecker {
         guard let userID = AppleCredentialStore.appleUserID else { return true }
 
         return await withCheckedContinuation { continuation in
+            let resumeOnce = SingleResumeBox(continuation)
             ASAuthorizationAppleIDProvider().getCredentialState(forUserID: userID) { state, _ in
                 switch state {
                 case .authorized:
-                    continuation.resume(returning: true)
+                    resumeOnce.resume(returning: true)
                 case .revoked, .notFound, .transferred:
                     AuthStore.signOut()
-                    continuation.resume(returning: false)
+                    resumeOnce.resume(returning: false)
                 @unknown default:
-                    continuation.resume(returning: false)
+                    resumeOnce.resume(returning: false)
                 }
             }
         }

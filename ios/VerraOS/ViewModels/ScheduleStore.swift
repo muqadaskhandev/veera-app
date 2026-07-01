@@ -144,14 +144,7 @@ final class ScheduleStore {
             return
         }
 
-        let status = CalendarSyncService.authorizationStatus
-        let hasAccess: Bool
-        if #available(iOS 17.0, *) {
-            hasAccess = status == .fullAccess || status == .authorized
-        } else {
-            hasAccess = status == .authorized
-        }
-        guard hasAccess else {
+        guard CalendarSyncService.hasCalendarAccess else {
             appleLinked = false
             busyBlocks = []
             calendarSyncError = CalendarSyncError.accessDenied.localizedDescription
@@ -170,7 +163,7 @@ final class ScheduleStore {
 
         if exportSessions {
             for session in sessions where session.accent != .personal {
-                try? CalendarSyncService.exportSession(session)
+                _ = try? CalendarSyncService.exportSession(session)
             }
         }
     }
@@ -193,7 +186,7 @@ final class ScheduleStore {
 
     func syncSessionToCalendar(_ session: Session) {
         guard appleLinked, exportSessions, session.accent != .personal else { return }
-        try? CalendarSyncService.exportSession(session)
+        _ = try? CalendarSyncService.exportSession(session)
     }
 
     func removeSessionFromCalendar(_ sessionID: UUID) {

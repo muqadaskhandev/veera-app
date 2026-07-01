@@ -39,17 +39,6 @@ enum HealthBackgroundSync {
     static let taskIdentifier = "com.verra.health.sync"
     private static let lastBackgroundSyncKey = "verra.health.lastBackgroundSync"
 
-    /// Register the BGAppRefresh task handler. Call once at app launch.
-    static func register() {
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) { task in
-            guard let refreshTask = task as? BGAppRefreshTask else {
-                task.setTaskCompleted(success: false)
-                return
-            }
-            handle(refreshTask)
-        }
-    }
-
     /// Request the next background refresh after a successful foreground sync.
     static func scheduleNextRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: taskIdentifier)
@@ -88,18 +77,5 @@ enum HealthBackgroundSync {
         UserDefaults.standard.set(Date(), forKey: lastBackgroundSyncKey)
         scheduleNextRefresh()
         return wearables.lastSyncError == nil
-    }
-
-    private static func handle(_ task: BGAppRefreshTask) {
-        scheduleNextRefresh()
-
-        task.expirationHandler = {
-            task.setTaskCompleted(success: false)
-        }
-
-        Task { @MainActor in
-            let success = await performBackgroundSync()
-            task.setTaskCompleted(success: success)
-        }
     }
 }

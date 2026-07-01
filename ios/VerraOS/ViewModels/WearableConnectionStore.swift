@@ -200,7 +200,7 @@ final class WearableConnectionStore {
                 let daily = try await HealthKitService.fetchDailyMetrics(days: 30)
                 latestResponse = try await VerraAPI.syncHealth(
                     provider: WearableDevice.appleHealth.apiProvider,
-                    metrics: daily.map(\.asSyncInput),
+                    metrics: daily.map { $0.asSyncInput() },
                     accessToken: token
                 )
             }

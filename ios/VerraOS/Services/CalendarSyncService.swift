@@ -57,17 +57,7 @@ enum CalendarSyncService {
     // MARK: - Access
 
     static func requestAppleCalendarAccess() async throws {
-        let granted: Bool
-        if #available(iOS 17.0, *) {
-            granted = try await store.requestFullAccessToEvents()
-        } else {
-            granted = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
-                store.requestAccess(to: .event) { allowed, error in
-                    if let error { continuation.resume(throwing: error) }
-                    else { continuation.resume(returning: allowed) }
-                }
-            }
-        }
+        let granted = try await store.requestFullAccessToEvents()
         guard granted else { throw CalendarSyncError.accessDenied }
     }
 
@@ -216,11 +206,13 @@ enum CalendarSyncService {
 
     // MARK: - Helpers
 
+    /// Whether the app can read calendar events (required for import; export needs write or full).
+    static var hasCalendarAccess: Bool {
+        authorizationStatus == .fullAccess
+    }
+
     private static var isAuthorized: Bool {
-        if #available(iOS 17.0, *) {
-            return authorizationStatus == .fullAccess || authorizationStatus == .authorized
-        }
-        return authorizationStatus == .authorized
+        hasCalendarAccess
     }
 
     private static func rangesOverlap(_ startA: Int, _ durationA: Int, _ startB: Int, _ durationB: Int) -> Bool {

@@ -202,20 +202,11 @@ struct CalendarSyncSettingsView: View {
     }
 
     private var applePermissionLabel: String {
-        let status = CalendarSyncService.authorizationStatus
-        if #available(iOS 17.0, *) {
-            switch status {
-            case .fullAccess:
-                return "Full calendar access granted."
-            case .writeOnly:
-                return "Write-only access — enable full access in Settings to import busy blocks."
-            default:
-                break
-            }
-        }
-        switch status {
-        case .authorized:
-            return "Calendar access granted."
+        switch CalendarSyncService.authorizationStatus {
+        case .fullAccess:
+            return "Full calendar access granted."
+        case .writeOnly:
+            return "Write-only access — enable full access in Settings to import busy blocks."
         case .denied, .restricted:
             return "Calendar access denied. Open Settings → Verra → Calendars to allow access."
         case .notDetermined:
