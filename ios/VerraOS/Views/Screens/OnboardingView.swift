@@ -1517,7 +1517,7 @@ struct OnboardingView: View {
                 )
             }
         } catch {
-            saveError = error.localizedDescription
+            saveError = authErrorMessage(AppleSignInService.mapError(error))
         }
     }
 

@@ -59,7 +59,12 @@ struct APIClient {
             request.httpBody = try JSONEncoder().encode(AnyEncodable(body))
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw mapTransportError(error)
+        }
         guard let http = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
@@ -77,6 +82,22 @@ struct APIClient {
         }
         let fallback = String(data: data, encoding: .utf8) ?? "Request failed"
         throw APIError.server(fallback)
+    }
+
+    private func mapTransportError(_ error: Error) -> Error {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                return APIError.server("No internet connection.")
+            case .cannotConnectToHost, .timedOut:
+                return APIError.server(
+                    "Cannot reach server at \(APIConfig.baseURL.absoluteString). Start the backend and use your Mac's LAN IP (not 127.0.0.1) on a physical device."
+                )
+            default:
+                break
+            }
+        }
+        return error
     }
 
     func upload<T: Decodable>(
@@ -107,7 +128,12 @@ struct APIClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = body
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw mapTransportError(error)
+        }
         guard let http = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }

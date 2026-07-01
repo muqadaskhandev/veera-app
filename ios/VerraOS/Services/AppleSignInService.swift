@@ -23,7 +23,9 @@ enum AppleSignInService {
             }
             controller.delegate = delegate
             controller.presentationContextProvider = delegate
+            // Keep controller + delegate alive until Apple calls back.
             delegate.retainSelf = delegate
+            delegate.retainController = controller
             controller.performRequests()
         }
     }
@@ -77,26 +79,30 @@ enum AppleSignInService {
 private final class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
     private let completion: (Result<AppleSignInResult, Error>) -> Void
     var retainSelf: AppleSignInDelegate?
+    var retainController: ASAuthorizationController?
 
     init(completion: @escaping (Result<AppleSignInResult, Error>) -> Void) {
         self.completion = completion
     }
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        #if os(iOS)
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        for scene in scenes where scene.activationState == .foregroundActive {
-            if let window = scene.windows.first(where: \.isKeyWindow) {
-                return window
-            }
-            if let window = scene.windows.first {
-                return window
-            }
+        if let window = scenes
+            .sorted(by: { $0.activationState.rawValue > $1.activationState.rawValue })
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow) {
+            return window
         }
-        return scenes.flatMap(\.windows).first ?? ASPresentationAnchor()
+        if let window = scenes.flatMap(\.windows).first {
+            return window
+        }
+        #endif
+        return ASPresentationAnchor()
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
-        defer { retainSelf = nil }
+        defer { release() }
         do {
             completion(.success(try AppleSignInService.result(from: authorization)))
         } catch {
@@ -105,7 +111,12 @@ private final class AppleSignInDelegate: NSObject, ASAuthorizationControllerDele
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
-        defer { retainSelf = nil }
+        defer { release() }
         completion(.failure(AppleSignInService.mapError(error)))
+    }
+
+    private func release() {
+        retainSelf = nil
+        retainController = nil
     }
 }

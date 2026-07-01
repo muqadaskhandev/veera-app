@@ -3,6 +3,7 @@
 //  VerraOS
 //
 
+import EventKit
 import SwiftUI
 
 /// Connect external (personal) calendars to the app, and choose import/export
@@ -11,14 +12,18 @@ struct CalendarSyncSettingsView: View {
     @Environment(ScheduleStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
+    @State private var isConnectingApple = false
+    @State private var alertMessage: String?
+
     var body: some View {
         @Bindable var store = store
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                     statusSummary
-                    linkSection(google: $store.googleLinked, apple: $store.appleLinked)
+                    linkSection
                     directionalitySection(importEvents: $store.importPersonalEvents, exportSessions: $store.exportSessions)
+                    permissionNote
                     footnote
                 }
                 .padding(.horizontal, Theme.Spacing.md)
@@ -35,6 +40,22 @@ struct CalendarSyncSettingsView: View {
                         .foregroundStyle(Theme.Color.ink)
                 }
             }
+            .alert("Calendar Sync", isPresented: Binding(
+                get: { alertMessage != nil },
+                set: { if !$0 { alertMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { alertMessage = nil }
+            } message: {
+                Text(alertMessage ?? "")
+            }
+            .onChange(of: store.importPersonalEvents) { _, _ in
+                store.saveCalendarPrefs()
+                Task { await store.refreshCalendarData() }
+            }
+            .onChange(of: store.exportSessions) { _, _ in
+                store.saveCalendarPrefs()
+                Task { await store.refreshCalendarData() }
+            }
         }
     }
 
@@ -46,15 +67,19 @@ struct CalendarSyncSettingsView: View {
                 Circle()
                     .fill(store.isSynced ? Color(hex: 0x57C77B).opacity(0.16) : Theme.Color.surfaceMuted)
                     .frame(width: 52, height: 52)
-                Image(systemName: store.isSynced ? "checkmark.circle.fill" : "link.badge.plus")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(store.isSynced ? Color(hex: 0x57C77B) : Theme.Color.inkMuted)
+                if store.isRefreshingCalendar {
+                    ProgressView()
+                } else {
+                    Image(systemName: store.isSynced ? "checkmark.circle.fill" : "link.badge.plus")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(store.isSynced ? Color(hex: 0x57C77B) : Theme.Color.inkMuted)
+                }
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(store.isSynced ? "Synced" : "Offline")
                     .font(.system(size: 19, weight: .bold, design: .rounded))
                     .foregroundStyle(Theme.Color.ink)
-                Text(store.isSynced ? "Your calendars are connected." : "Link a calendar to start syncing.")
+                Text(statusSubtitle)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.Color.inkMuted)
             }
@@ -66,25 +91,45 @@ struct CalendarSyncSettingsView: View {
         .cardShadow()
     }
 
+    private var statusSubtitle: String {
+        if store.isSynced {
+            if store.appleLinked { return "Apple Calendar connected." }
+            return "Your calendars are connected."
+        }
+        return "Link Apple Calendar to import busy times and export sessions."
+    }
+
     // MARK: Link accounts
 
-    private func linkSection(google: Binding<Bool>, apple: Binding<Bool>) -> some View {
+    private var linkSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionLabel("Link Account")
             VStack(spacing: Theme.Spacing.sm) {
-                LinkAccountRow(
-                    title: "Google Calendar",
-                    icon: "calendar",
-                    tint: Color(hex: 0x4285F4),
-                    isLinked: google
-                )
-                LinkAccountRow(
-                    title: "Apple Calendar",
-                    icon: "calendar",
-                    tint: Theme.Color.ink,
-                    isLinked: apple
+                GoogleCalendarRow()
+                AppleCalendarRow(
+                    isLinked: store.appleLinked,
+                    isConnecting: isConnectingApple,
+                    onConnect: connectApple,
+                    onDisconnect: disconnectApple
                 )
             }
+        }
+    }
+
+    private func connectApple() {
+        isConnectingApple = true
+        Task {
+            let ok = await store.connectAppleCalendar()
+            isConnectingApple = false
+            if !ok {
+                alertMessage = store.calendarSyncError ?? "Could not connect Apple Calendar."
+            }
+        }
+    }
+
+    private func disconnectApple() {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            store.disconnectAppleCalendar()
         }
     }
 
@@ -139,8 +184,49 @@ struct CalendarSyncSettingsView: View {
         .padding(.vertical, 14)
     }
 
+    @ViewBuilder
+    private var permissionNote: some View {
+        if let error = store.calendarSyncError {
+            Text(error)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.Color.danger)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+        } else if store.appleLinked {
+            Text(applePermissionLabel)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.Color.inkFaint)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    private var applePermissionLabel: String {
+        let status = CalendarSyncService.authorizationStatus
+        if #available(iOS 17.0, *) {
+            switch status {
+            case .fullAccess:
+                return "Full calendar access granted."
+            case .writeOnly:
+                return "Write-only access — enable full access in Settings to import busy blocks."
+            default:
+                break
+            }
+        }
+        switch status {
+        case .authorized:
+            return "Calendar access granted."
+        case .denied, .restricted:
+            return "Calendar access denied. Open Settings → Verra → Calendars to allow access."
+        case .notDetermined:
+            return "Calendar permission not yet requested."
+        default:
+            return ""
+        }
+    }
+
     private var footnote: some View {
-        Text("Connect your personal and work calendars so nothing double-books. Account connections are simulated in this build.")
+        Text("Connect Apple Calendar so personal appointments appear as busy blocks and coaching sessions stay in sync. Google Calendar support is coming soon.")
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(Theme.Color.inkFaint)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -155,23 +241,56 @@ struct CalendarSyncSettingsView: View {
     }
 }
 
-/// A single connect/disconnect row for an external calendar provider.
-private struct LinkAccountRow: View {
-    let title: String
-    let icon: String
-    let tint: Color
-    @Binding var isLinked: Bool
+// MARK: - Link rows
+
+private struct GoogleCalendarRow: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Color(hex: 0x4285F4).opacity(0.14)).frame(width: 40, height: 40)
+                Image(systemName: "calendar")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0x4285F4))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Google Calendar")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.Color.ink)
+                Text("Coming soon")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.Color.inkMuted)
+            }
+            Spacer()
+            Text("Soon")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(Theme.Color.inkFaint)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background(Theme.Color.surfaceMuted, in: Capsule())
+        }
+        .padding(Theme.Spacing.md)
+        .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+        .opacity(0.7)
+    }
+}
+
+private struct AppleCalendarRow: View {
+    let isLinked: Bool
+    let isConnecting: Bool
+    let onConnect: () -> Void
+    let onDisconnect: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                Circle().fill(tint.opacity(0.14)).frame(width: 40, height: 40)
-                Image(systemName: icon)
+                Circle().fill(Theme.Color.ink.opacity(0.14)).frame(width: 40, height: 40)
+                Image(systemName: "calendar")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(Theme.Color.ink)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text("Apple Calendar")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.Color.ink)
                 Text(isLinked ? "Connected" : "Not connected")
@@ -180,16 +299,23 @@ private struct LinkAccountRow: View {
             }
             Spacer()
             Button {
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { isLinked.toggle() }
+                if isLinked { onDisconnect() } else { onConnect() }
             } label: {
-                Text(isLinked ? "Disconnect" : "Connect")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(isLinked ? Theme.Color.inkMuted : Theme.Color.accentInk)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 9)
-                    .background(isLinked ? Theme.Color.surfaceMuted : Theme.Color.accent, in: Capsule())
+                Group {
+                    if isConnecting {
+                        ProgressView()
+                    } else {
+                        Text(isLinked ? "Disconnect" : "Connect")
+                    }
+                }
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(isLinked ? Theme.Color.inkMuted : Theme.Color.accentInk)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background(isLinked ? Theme.Color.surfaceMuted : Theme.Color.accent, in: Capsule())
             }
             .buttonStyle(.plain)
+            .disabled(isConnecting)
         }
         .padding(Theme.Spacing.md)
         .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))

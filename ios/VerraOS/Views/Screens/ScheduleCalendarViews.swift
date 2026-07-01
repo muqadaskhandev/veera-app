@@ -87,50 +87,69 @@ private struct TimelineRow: View {
     let session: Session
     var onTap: () -> Void
 
+    private var isBusyBlock: Bool {
+        session.notes == "Imported from Apple Calendar"
+    }
+
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: Theme.Spacing.md) {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(session.start)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Color.ink)
-                    Text(timeMeridiem)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.Color.inkFaint)
-                }
-                .frame(width: 48, alignment: .trailing)
-
-                HStack(spacing: 12) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(session.accent.tint)
-                        .frame(width: 4)
-
-                    Text(session.clientName)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.Color.ink)
-                        .strikethrough(session.isCompleted || session.isSkipped, color: Theme.Color.inkMuted)
-                    Spacer(minLength: 0)
-                    if session.isSkipped {
-                        Text("Skipped")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(Color(hex: 0xE08A3C))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color(hex: 0xE08A3C).opacity(0.16), in: Capsule())
-                    } else if session.isCompleted {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(Color(hex: 0x57C77B))
-                    }
-                }
-                .padding(.vertical, 16)
-                .padding(.horizontal, 14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(session.accent.soft, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
-                .opacity(session.isSkipped ? 0.5 : 1)
+        Group {
+            if isBusyBlock {
+                rowContent
+            } else {
+                Button(action: onTap) { rowContent }
+                    .buttonStyle(PressableRowStyle())
             }
         }
-        .buttonStyle(PressableRowStyle())
+    }
+
+    private var rowContent: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(session.start)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(isBusyBlock ? Theme.Color.inkMuted : Theme.Color.ink)
+                Text(timeMeridiem)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.Color.inkFaint)
+            }
+            .frame(width: 48, alignment: .trailing)
+
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(session.accent.tint.opacity(isBusyBlock ? 0.5 : 1))
+                    .frame(width: 4)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.clientName)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(isBusyBlock ? Theme.Color.inkMuted : Theme.Color.ink)
+                        .strikethrough(session.isCompleted || session.isSkipped, color: Theme.Color.inkMuted)
+                    if isBusyBlock {
+                        Text("Personal · Apple Calendar")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.Color.inkFaint)
+                    }
+                }
+                Spacer(minLength: 0)
+                if session.isSkipped {
+                    Text("Skipped")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color(hex: 0xE08A3C))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color(hex: 0xE08A3C).opacity(0.16), in: Capsule())
+                } else if session.isCompleted {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(Color(hex: 0x57C77B))
+                }
+            }
+            .padding(.vertical, 16)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(session.accent.soft.opacity(isBusyBlock ? 0.6 : 1), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .opacity(session.isSkipped ? 0.5 : 1)
+        }
     }
 
     private var timeMeridiem: String {

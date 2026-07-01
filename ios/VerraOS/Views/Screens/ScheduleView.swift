@@ -32,7 +32,11 @@ struct ScheduleView: View {
         ("Mon", 15), ("Tue", 16), ("Wed", 17), ("Thu", 18), ("Fri", 19), ("Sat", 20), ("Sun", 21)
     ]
 
-    private var daySessions: [Session] { store.sessions(on: selectedDay) }
+    private var daySessions: [Session] { store.timelineItems(on: selectedDay) }
+
+    private func isImportedBusyBlock(_ session: Session) -> Bool {
+        session.notes == "Imported from Apple Calendar"
+    }
 
     private var weeklyVolume: Int {
         store.sessions.filter { (15...21).contains($0.dayOfMonth) }.count
@@ -73,6 +77,12 @@ struct ScheduleView: View {
         }
         .onAppear {
             store.reconcilePastSessions(clientStore: clientStore)
+            Task { await store.refreshCalendarData() }
+        }
+        .onChange(of: selectedDay) { _, _ in
+            if store.appleLinked, store.importPersonalEvents {
+                Task { await store.refreshCalendarData() }
+            }
         }
     }
 
@@ -114,7 +124,14 @@ struct ScheduleView: View {
                 detailSession = nil
             },
             onSendReminder: {
-                toast = ToastData(message: "Reminder sent", icon: "paperplane.fill")
+                Task {
+                    do {
+                        try await SessionReminderService.scheduleReminder(for: live)
+                        toast = ToastData(message: "Reminder scheduled for 1 hour before", icon: "bell.fill")
+                    } catch {
+                        toast = ToastData(message: "Could not schedule reminder", icon: "exclamationmark.triangle.fill")
+                    }
+                }
                 detailSession = nil
             },
             onCancel: {
@@ -230,7 +247,10 @@ struct ScheduleView: View {
                 week: week,
                 selectedDay: $selectedDay,
                 sessions: daySessions,
-                onSelectSession: { detailSession = $0 }
+                onSelectSession: { session in
+                    guard !isImportedBusyBlock(session) else { return }
+                    detailSession = session
+                }
             )
         case .month:
             MonthGridView(sessions: store.sessions, selectedDay: selectedDay) { day in

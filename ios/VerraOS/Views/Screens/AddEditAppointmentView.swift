@@ -53,6 +53,9 @@ struct AddEditAppointmentView: View {
     @State private var selectedWeekdays: Set<Int> = []
     @State private var skippedDays: Set<Int> = []
     @State private var clientSearch: String = ""
+    @State private var showConflictAlert = false
+    @State private var conflictMessage = ""
+    @State private var pendingCommit: (() -> Void)?
 
     /// Mon–Sun chips. Values are `Calendar` weekday ints (1 = Sun … 7 = Sat).
     private let weekdayOptions: [(label: String, value: Int)] = [
@@ -147,6 +150,7 @@ struct AddEditAppointmentView: View {
                     typePicker
                     clientSelector
                     dateTimeSection
+                    if !currentConflicts.isEmpty { conflictBanner }
                     if supportsRecurrence { recurrenceSection }
                     notesSection
                 }
@@ -170,7 +174,61 @@ struct AddEditAppointmentView: View {
                 }
             }
             .onAppear(perform: preselectClient)
+            .alert("Schedule Conflict", isPresented: $showConflictAlert) {
+                Button("Cancel", role: .cancel) { pendingCommit = nil }
+                Button("Save Anyway") {
+                    pendingCommit?()
+                    pendingCommit = nil
+                }
+            } message: {
+                Text(conflictMessage)
+            }
         }
+    }
+
+    private var currentConflicts: [ScheduleConflict] {
+        if isMultiDay {
+            return activeOccurrences.flatMap { occurrence in
+                let dom = Calendar.current.component(.day, from: occurrence)
+                return store.detectConflicts(
+                    dayOfMonth: dom,
+                    startMinutes: startMinutes,
+                    durationMinutes: durationMinutes,
+                    excludingSessionID: existing?.id
+                )
+            }
+        }
+        let day = Calendar.current.component(.day, from: date)
+        return store.detectConflicts(
+            dayOfMonth: day,
+            startMinutes: startMinutes,
+            durationMinutes: durationMinutes,
+            excludingSessionID: existing?.id
+        )
+    }
+
+    private var conflictBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Color(hex: 0xE08A3C))
+                Text("Time conflict detected")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Theme.Color.ink)
+            }
+            ForEach(currentConflicts) { conflict in
+                HStack(spacing: 6) {
+                    Text("•")
+                    Text("\(conflict.title) · \(conflict.timeRange)")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .foregroundStyle(Theme.Color.inkMuted)
+            }
+        }
+        .padding(Theme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(hex: 0xE08A3C).opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Color(hex: 0xE08A3C).opacity(0.35), lineWidth: 1))
     }
 
     // MARK: Sections
@@ -415,6 +473,17 @@ struct AddEditAppointmentView: View {
     }
 
     private func save() {
+        let conflicts = currentConflicts
+        if !conflicts.isEmpty {
+            conflictMessage = conflicts.map { "\($0.title) (\($0.timeRange))" }.joined(separator: "\n")
+            pendingCommit = commitSave
+            showConflictAlert = true
+            return
+        }
+        commitSave()
+    }
+
+    private func commitSave() {
         let tag = type.tag
         let name = selectedClient?.name ?? "Client"
         let initials = selectedClient?.initials ?? "?"

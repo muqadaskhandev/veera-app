@@ -15,13 +15,22 @@ final class ScheduleStore {
 
     // Calendar sync configuration
     var googleLinked: Bool = false
-    var appleLinked: Bool = true
+    var appleLinked: Bool = false
     var importPersonalEvents: Bool = true
     var exportSessions: Bool = false
+
+    /// Personal calendar blocks imported from Apple Calendar.
+    private(set) var busyBlocks: [BusyBlock] = []
+
+    var calendarSyncError: String?
+    var isRefreshingCalendar = false
+
+    private static let prefsKey = "verra.schedule.calendarPrefs"
 
     init(sessions: [Session] = Session.sample, clients: [Client] = Client.roster) {
         self.sessions = sessions
         self.clients = clients
+        loadCalendarPrefs()
     }
 
     /// Sync is considered active when at least one external calendar is linked.
@@ -61,9 +70,135 @@ final class ScheduleStore {
             .sorted { $0.startMinutes < $1.startMinutes }
     }
 
+    /// Imported busy blocks on a given day.
+    func busyBlocks(on day: Int) -> [BusyBlock] {
+        busyBlocks
+            .filter { $0.dayOfMonth == day }
+            .sorted { $0.startMinutes < $1.startMinutes }
+    }
+
+    /// Sessions plus imported busy blocks for the day timeline.
+    func timelineItems(on day: Int) -> [Session] {
+        let coaching = sessions(on: day)
+        guard appleLinked, importPersonalEvents else { return coaching }
+        let busy = busyBlocks(on: day).map { $0.asSession() }
+        return (coaching + busy).sorted { $0.startMinutes < $1.startMinutes }
+    }
+
     /// Remaining package sessions for the client matching this session, if any.
     func remainingSessions(for session: Session) -> Int? {
         clients.first { $0.name == session.clientName }?.sessionsRemaining
+    }
+
+    // MARK: Calendar sync
+
+    func loadCalendarPrefs() {
+        guard let data = UserDefaults.standard.data(forKey: Self.prefsKey),
+              let prefs = try? JSONDecoder().decode(CalendarPrefs.self, from: data) else { return }
+        googleLinked = prefs.googleLinked
+        appleLinked = prefs.appleLinked
+        importPersonalEvents = prefs.importPersonalEvents
+        exportSessions = prefs.exportSessions
+    }
+
+    func saveCalendarPrefs() {
+        let prefs = CalendarPrefs(
+            googleLinked: googleLinked,
+            appleLinked: appleLinked,
+            importPersonalEvents: importPersonalEvents,
+            exportSessions: exportSessions
+        )
+        if let data = try? JSONEncoder().encode(prefs) {
+            UserDefaults.standard.set(data, forKey: Self.prefsKey)
+        }
+    }
+
+    @MainActor
+    func connectAppleCalendar() async -> Bool {
+        do {
+            try await CalendarSyncService.requestAppleCalendarAccess()
+            appleLinked = true
+            calendarSyncError = nil
+            saveCalendarPrefs()
+            await refreshCalendarData()
+            return true
+        } catch {
+            appleLinked = false
+            calendarSyncError = error.localizedDescription
+            saveCalendarPrefs()
+            return false
+        }
+    }
+
+    func disconnectAppleCalendar() {
+        appleLinked = false
+        busyBlocks = []
+        calendarSyncError = nil
+        saveCalendarPrefs()
+    }
+
+    @MainActor
+    func refreshCalendarData() async {
+        guard appleLinked else {
+            busyBlocks = []
+            return
+        }
+
+        let status = CalendarSyncService.authorizationStatus
+        let hasAccess: Bool
+        if #available(iOS 17.0, *) {
+            hasAccess = status == .fullAccess || status == .authorized
+        } else {
+            hasAccess = status == .authorized
+        }
+        guard hasAccess else {
+            appleLinked = false
+            busyBlocks = []
+            calendarSyncError = CalendarSyncError.accessDenied.localizedDescription
+            saveCalendarPrefs()
+            return
+        }
+
+        isRefreshingCalendar = true
+        defer { isRefreshingCalendar = false }
+
+        if importPersonalEvents {
+            busyBlocks = CalendarSyncService.fetchBusyBlocks(forMonthContaining: Date())
+        } else {
+            busyBlocks = []
+        }
+
+        if exportSessions {
+            for session in sessions where session.accent != .personal {
+                try? CalendarSyncService.exportSession(session)
+            }
+        }
+    }
+
+    func detectConflicts(
+        dayOfMonth: Int,
+        startMinutes: Int,
+        durationMinutes: Int,
+        excludingSessionID: UUID? = nil
+    ) -> [ScheduleConflict] {
+        CalendarSyncService.detectConflicts(
+            dayOfMonth: dayOfMonth,
+            startMinutes: startMinutes,
+            durationMinutes: durationMinutes,
+            excludingSessionID: excludingSessionID,
+            sessions: sessions,
+            busyBlocks: appleLinked && importPersonalEvents ? busyBlocks : []
+        )
+    }
+
+    func syncSessionToCalendar(_ session: Session) {
+        guard appleLinked, exportSessions, session.accent != .personal else { return }
+        try? CalendarSyncService.exportSession(session)
+    }
+
+    func removeSessionFromCalendar(_ sessionID: UUID) {
+        CalendarSyncService.deleteExportedSession(sessionID)
+        SessionReminderService.cancelReminder(for: sessionID)
     }
 
     // MARK: Mutations
@@ -75,20 +210,18 @@ final class ScheduleStore {
         if let clientIndex = clients.firstIndex(where: { $0.name == session.clientName }) {
             clients[clientIndex].sessionsRemaining = max(0, clients[clientIndex].sessionsRemaining - 1)
         }
+        SessionReminderService.cancelReminder(for: session.id)
     }
 
     /// Removes a cancelled session from the timeline.
     func cancel(_ session: Session) {
+        removeSessionFromCalendar(session.id)
         sessions.removeAll { $0.id == session.id }
     }
 
     /// Marks any session whose time slot has fully passed as completed and
     /// deducts it from the client's balance — in both this store and the shared
     /// client roster — so the "sessions left" count stays accurate automatically.
-    /// A session only counts once its actual end time is in the past (not merely
-    /// because the calendar rolled to a new day). Skipped and personal sessions
-    /// are ignored. Idempotent: each session is only counted once because it
-    /// flips to completed.
     func reconcilePastSessions(clientStore: ClientStore) {
         for index in sessions.indices {
             let session = sessions[index]
@@ -101,6 +234,7 @@ final class ScheduleStore {
                 clients[clientIndex].sessionsRemaining = max(0, clients[clientIndex].sessionsRemaining - 1)
             }
             clientStore.deductSession(forName: session.clientName)
+            SessionReminderService.cancelReminder(for: session.id)
         }
     }
 
@@ -112,6 +246,7 @@ final class ScheduleStore {
         let wasCounted = sessions[index].isCompleted
         sessions[index].isSkipped = true
         sessions[index].isCompleted = false
+        SessionReminderService.cancelReminder(for: session.id)
         guard wasCounted, session.accent != .personal else { return }
         if let clientIndex = clients.firstIndex(where: { $0.name == session.clientName }) {
             clients[clientIndex].sessionsRemaining += 1
@@ -133,5 +268,16 @@ final class ScheduleStore {
         } else {
             sessions.append(session)
         }
+        syncSessionToCalendar(session)
+        Task {
+            try? await SessionReminderService.scheduleReminder(for: session)
+        }
     }
+}
+
+private struct CalendarPrefs: Codable {
+    var googleLinked: Bool
+    var appleLinked: Bool
+    var importPersonalEvents: Bool
+    var exportSessions: Bool
 }

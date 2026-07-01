@@ -20,6 +20,10 @@
 	</dict>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Verra reads your sleep, steps, heart rate, and activity from Apple Health so your trainer can support your progress.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Verra reads your personal calendar to show busy times and avoid double-booking, and can add coaching sessions to your calendar when you enable export.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Verra needs full calendar access to import personal events as busy blocks and export your coaching sessions.</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.verra.health.sync</string>
