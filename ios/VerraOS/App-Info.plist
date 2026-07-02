@@ -18,6 +18,12 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Verra uses your camera to capture photos and videos to send in chat.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Verra lets you choose photos and videos from your library to send in chat.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Verra uses your microphone to record voice and video messages in chat.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Verra reads your sleep, steps, heart rate, and activity from Apple Health so your trainer can support your progress.</string>
 	<key>NSCalendarsUsageDescription</key>

@@ -39,24 +39,30 @@ enum MessageKind: Hashable {
 struct Message: Identifiable, Hashable {
     let id: UUID
     var kind: MessageKind
-    /// True when the trainer (current user) sent it — renders on the right.
+    /// True when the current user sent it — renders on the right.
     var isOutgoing: Bool
-    /// Minutes ago this message was sent, used for the seeded timeline ordering.
-    var minutesAgo: Int
+    var sentAt: Date
     var reaction: Reaction?
+    var attachmentURL: String?
+
+    var minutesAgo: Int {
+        max(0, Int(Date().timeIntervalSince(sentAt) / 60))
+    }
 
     init(
         id: UUID = UUID(),
         kind: MessageKind,
         isOutgoing: Bool,
-        minutesAgo: Int = 0,
-        reaction: Reaction? = nil
+        sentAt: Date = .now,
+        reaction: Reaction? = nil,
+        attachmentURL: String? = nil
     ) {
         self.id = id
         self.kind = kind
         self.isOutgoing = isOutgoing
-        self.minutesAgo = minutesAgo
+        self.sentAt = sentAt
         self.reaction = reaction
+        self.attachmentURL = attachmentURL
     }
 }
 
@@ -69,17 +75,67 @@ struct Conversation: Identifiable, Hashable {
     let initials: String
     var messages: [Message]
     var isUnread: Bool
-    /// Minutes since the client was last active, drives the "Active 10m ago" line.
-    var lastActiveMinutes: Int
+    var lastActiveAt: Date
+    var lastMessagePreview: String?
+    var lastMessageAt: Date?
+    var otherParticipantUserID: UUID?
+    var otherParticipantIsOnline: Bool
+    var otherParticipantLastSeen: Date?
+
+    /// Presence label for the chat header.
+    var presenceLabel: String {
+        if otherParticipantIsOnline { return "Active now" }
+        if let lastSeen = otherParticipantLastSeen {
+            let minutes = max(0, Int(Date().timeIntervalSince(lastSeen) / 60))
+            if minutes < 1 { return "Active recently" }
+            return "Last seen \(relativeTime(minutes: minutes)) ago"
+        }
+        return "Offline"
+    }
+
+    var presenceIsLive: Bool {
+        otherParticipantIsOnline
+    }
 
     /// Most recent message for the inbox preview.
     var lastMessage: Message? {
-        messages.max(by: { $0.minutesAgo > $1.minutesAgo })
+        messages.max(by: { $0.sentAt < $1.sentAt })
     }
 
     /// Minutes since the last message, for the inbox timestamp.
     var lastMinutesAgo: Int {
-        messages.map(\.minutesAgo).min() ?? 0
+        if let lastMessageAt {
+            return max(0, Int(Date().timeIntervalSince(lastMessageAt) / 60))
+        }
+        return max(0, Int(Date().timeIntervalSince(lastActiveAt) / 60))
+    }
+
+    init(
+        id: UUID,
+        clientID: UUID,
+        clientName: String,
+        initials: String,
+        messages: [Message] = [],
+        isUnread: Bool = false,
+        lastActiveAt: Date = .now,
+        lastMessagePreview: String? = nil,
+        lastMessageAt: Date? = nil,
+        otherParticipantUserID: UUID? = nil,
+        otherParticipantIsOnline: Bool = false,
+        otherParticipantLastSeen: Date? = nil
+    ) {
+        self.id = id
+        self.clientID = clientID
+        self.clientName = clientName
+        self.initials = initials
+        self.messages = messages
+        self.isUnread = isUnread
+        self.lastActiveAt = lastActiveAt
+        self.lastMessagePreview = lastMessagePreview
+        self.lastMessageAt = lastMessageAt
+        self.otherParticipantUserID = otherParticipantUserID
+        self.otherParticipantIsOnline = otherParticipantIsOnline
+        self.otherParticipantLastSeen = otherParticipantLastSeen
     }
 }
 

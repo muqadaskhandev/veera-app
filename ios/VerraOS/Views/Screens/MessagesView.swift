@@ -48,10 +48,11 @@ struct MessagesView: View {
         }
         .sheet(isPresented: $showingNew) {
             NewMessageSheet { client in
-                let id = store.threadID(for: client)
                 showingNew = false
-                if let convo = store.conversation(id: id) {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                Task {
+                    let id = await store.threadID(for: client)
+                    if let convo = store.conversation(id: id) {
+                        try? await Task.sleep(for: .milliseconds(350))
                         path.append(convo)
                     }
                 }
@@ -59,18 +60,30 @@ struct MessagesView: View {
         }
         .onAppear { openPendingChatIfNeeded() }
         .onChange(of: app.pendingChatClientID) { _, _ in openPendingChatIfNeeded() }
+        .onChange(of: app.pendingChatConversationID) { _, _ in openPendingChatIfNeeded() }
     }
 
-    /// Opens the thread requested from another tab (e.g. the client card chat icon).
+    /// Opens the thread requested from another tab or a push notification.
     private func openPendingChatIfNeeded() {
+        if let conversationID = app.pendingChatConversationID {
+            app.pendingChatConversationID = nil
+            guard let convo = store.conversation(id: conversationID) else { return }
+            store.markRead(convo.id)
+            path = NavigationPath()
+            path.append(convo)
+            return
+        }
+
         guard let clientID = app.pendingChatClientID,
               let client = clientStore.clients.first(where: { $0.id == clientID }) else { return }
-        let id = store.threadID(for: client)
         app.pendingChatClientID = nil
-        guard let convo = store.conversation(id: id) else { return }
-        store.markRead(convo.id)
-        path = NavigationPath()
-        path.append(convo)
+        Task {
+            let id = await store.threadID(for: client)
+            guard let convo = store.conversation(id: id) else { return }
+            store.markRead(convo.id)
+            path = NavigationPath()
+            path.append(convo)
+        }
     }
 
     // MARK: Content
@@ -206,7 +219,7 @@ private struct ConversationRow: View {
                         .foregroundStyle(Theme.Color.inkFaint)
                 }
                 HStack(spacing: 6) {
-                    Text(conversation.lastMessage?.kind.preview ?? "No messages yet")
+                    Text(conversation.lastMessage?.kind.preview ?? conversation.lastMessagePreview ?? "No messages yet")
                         .font(.system(size: 13.5, weight: conversation.isUnread ? .semibold : .medium))
                         .foregroundStyle(conversation.isUnread ? Theme.Color.ink : Theme.Color.inkMuted)
                         .lineLimit(1)

@@ -85,6 +85,16 @@ struct ContentView: View {
         .task {
             await trainer.refreshFromServer()
             await clients.refreshFromServer()
+            if let token = AuthStore.accessToken {
+                await messages.start(accessToken: token)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openChatConversation)) { notification in
+            guard let conversationID = notification.object as? UUID else { return }
+            app.openChat(conversationID: conversationID)
+        }
+        .onDisappear {
+            messages.stop()
         }
     }
 

@@ -14,6 +14,11 @@ func routes(_ app: Application) throws {
     try app.register(collection: ProfileController())
     try app.register(collection: HealthController())
     try app.register(collection: SessionController())
+    try app.register(collection: ConversationController())
+
+    app.webSocket("ws", "chat") { req, ws in
+        await ChatWebSocketHandler.handle(req: req, socket: ws)
+    }
 }
 
 struct HealthResponse: Content {

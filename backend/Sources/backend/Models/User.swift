@@ -34,6 +34,9 @@ final class User: Model, Content, Authenticatable, @unchecked Sendable {
     @Field(key: "is_active")
     var isActive: Bool
 
+    @OptionalField(key: "last_seen_at")
+    var lastSeenAt: Date?
+
     @Timestamp(key: "created_at", on: .create)
     var createdAt: Date?
 

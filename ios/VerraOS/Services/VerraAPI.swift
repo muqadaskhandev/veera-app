@@ -419,6 +419,157 @@ enum VerraAPI {
             token: accessToken
         )
     }
+
+    // MARK: - Chat
+
+    struct CreateMessageBody: Encodable {
+        let kind: String
+        let body: String
+        let attachmentURL: String?
+    }
+
+    struct UpdateReactionBody: Encodable {
+        let reaction: String?
+    }
+
+    struct RegisterPushTokenBody: Encodable {
+        let token: String
+        let platform: String
+    }
+
+    struct FlushOfflineQueueBody: Encodable {
+        let messages: [OfflineMessageBody]
+    }
+
+    struct OfflineMessageBody: Encodable {
+        let conversationID: UUID
+        let kind: String
+        let body: String
+        let attachmentURL: String?
+    }
+
+    static func fetchConversations(accessToken: String) async throws -> [ConversationDTO] {
+        try await APIClient.shared.request("/api/conversations", token: accessToken)
+    }
+
+    static func getOrCreateMyConversation(accessToken: String) async throws -> ConversationDTO {
+        try await APIClient.shared.request(
+            "/api/conversations/mine",
+            method: "POST",
+            token: accessToken
+        )
+    }
+
+    static func uploadChatAttachment(
+        conversationID: UUID,
+        data: Data,
+        filename: String,
+        mimeType: String,
+        accessToken: String
+    ) async throws -> AttachmentUploadResponse {
+        try await APIClient.shared.upload(
+            path: "/api/conversations/\(conversationID.uuidString)/attachments",
+            fieldName: "file",
+            fileData: data,
+            filename: filename,
+            mimeType: mimeType,
+            token: accessToken
+        )
+    }
+
+    static func getOrCreateConversation(clientID: UUID, accessToken: String) async throws -> ConversationDTO {
+        try await APIClient.shared.request(
+            "/api/conversations/for-client/\(clientID.uuidString)",
+            method: "POST",
+            token: accessToken
+        )
+    }
+
+    static func fetchConversationDetail(
+        id: UUID,
+        includeMessages: Int = 50,
+        accessToken: String
+    ) async throws -> ConversationDetailResponse {
+        try await APIClient.shared.request(
+            "/api/conversations/\(id.uuidString)?includeMessages=\(includeMessages)",
+            token: accessToken
+        )
+    }
+
+    static func fetchMessages(
+        conversationID: UUID,
+        limit: Int = 50,
+        accessToken: String
+    ) async throws -> MessagesPageResponse {
+        try await APIClient.shared.request(
+            "/api/conversations/\(conversationID.uuidString)/messages?limit=\(limit)",
+            token: accessToken
+        )
+    }
+
+    static func sendMessage(
+        conversationID: UUID,
+        kind: MessageKind,
+        attachmentURL: String? = nil,
+        accessToken: String
+    ) async throws -> MessageDTO {
+        try await APIClient.shared.request(
+            "/api/conversations/\(conversationID.uuidString)/messages",
+            method: "POST",
+            body: CreateMessageBody(
+                kind: MessageLoader.kindString(from: kind),
+                body: MessageLoader.bodyString(from: kind),
+                attachmentURL: attachmentURL
+            ),
+            token: accessToken
+        )
+    }
+
+    static func markConversationRead(conversationID: UUID, accessToken: String) async throws -> ConversationDTO {
+        try await APIClient.shared.request(
+            "/api/conversations/\(conversationID.uuidString)/read",
+            method: "PATCH",
+            token: accessToken
+        )
+    }
+
+    static func setMessageReaction(
+        messageID: UUID,
+        reaction: Reaction?,
+        accessToken: String
+    ) async throws -> MessageDTO {
+        try await APIClient.shared.request(
+            "/api/messages/\(messageID.uuidString)/reaction",
+            method: "PATCH",
+            body: UpdateReactionBody(reaction: reaction?.rawValue),
+            token: accessToken
+        )
+    }
+
+    static func registerPushToken(_ token: String, accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/devices/push-token",
+            method: "POST",
+            body: RegisterPushTokenBody(token: token, platform: "ios"),
+            token: accessToken
+        )
+    }
+
+    static func flushOfflineQueue(_ messages: [PendingChatMessage], accessToken: String) async throws -> [MessageDTO] {
+        try await APIClient.shared.request(
+            "/api/chat/offline-queue",
+            method: "POST",
+            body: FlushOfflineQueueBody(messages: messages.map {
+                OfflineMessageBody(
+                    conversationID: $0.conversationID,
+                    kind: $0.kind,
+                    body: $0.body,
+                    attachmentURL: $0.attachmentURL
+                )
+            }),
+            token: accessToken
+        )
+    }
 }
 
 private struct EmptyResponse: Decodable {}

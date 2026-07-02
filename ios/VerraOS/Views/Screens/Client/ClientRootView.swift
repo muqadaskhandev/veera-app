@@ -95,7 +95,7 @@ struct ClientRootView: View {
         status: .active
     )
 
-    private let conversationID: UUID
+    @State private var conversationID: UUID
     private let drawerWidth: CGFloat = 308
     private let appVersion = "v1.0.2"
     private let legalURL = URL(string: "https://verraos.app/legal")!
@@ -111,7 +111,7 @@ struct ClientRootView: View {
 
         let store = MessageStore(conversations: [MessageStore.clientThread(for: placeholder)])
         _messages = State(initialValue: store)
-        self.conversationID = store.conversations.first?.id ?? UUID()
+        _conversationID = State(initialValue: store.conversations.first?.id ?? UUID())
 
         let p = ProfileStore()
         p.setVisibleModules([.workout, .wearables, .weight, .nutrition, .photos, .financials], for: placeholder.id)
@@ -189,12 +189,26 @@ struct ClientRootView: View {
                 await healthData.refreshForClient(clientID: clientID, trainerView: false)
             }
             await HealthBackgroundSync.syncOnLaunchIfNeeded(wearables: wearables, healthData: healthData)
+            if let token = AuthStore.accessToken {
+                await messages.start(accessToken: token)
+                if let id = await messages.ensureClientThread() {
+                    conversationID = id
+                }
+            }
+        }
+        .onDisappear {
+            messages.stop()
         }
         .onReceive(NotificationCenter.default.publisher(for: .healthKitDataUpdated)) { _ in
             Task {
                 guard wearables.isConnected(.appleHealth) else { return }
                 await wearables.syncNow(healthData: healthData)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openChatConversation)) { notification in
+            guard let id = notification.object as? UUID else { return }
+            conversationID = id
+            withAnimation(.easeInOut(duration: 0.2)) { tab = .messages }
         }
     }
 

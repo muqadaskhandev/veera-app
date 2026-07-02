@@ -99,8 +99,10 @@ struct ClientsView: View {
                                 client: client,
                                 onProfile: { path.append(client) },
                                 onChat: {
-                                    _ = messages.threadID(for: client)
-                                    app.openChat(with: client.id)
+                                    Task {
+                                        _ = await messages.threadID(for: client)
+                                        app.openChat(with: client.id)
+                                    }
                                 },
                                 onArchive: {
                                     withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {

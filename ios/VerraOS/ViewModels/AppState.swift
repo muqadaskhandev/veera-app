@@ -13,6 +13,9 @@ final class AppState {
     var isDrawerOpen: Bool = false
     var hasUnreadNotification: Bool = true
 
+    /// Set when another tab or a push notification requests opening a chat thread.
+    var pendingChatConversationID: UUID?
+
     /// Set when another tab requests opening a specific client's chat thread.
     /// The Messages tab observes this, opens the thread, then clears it.
     var pendingChatClientID: UUID?
@@ -48,6 +51,14 @@ final class AppState {
     /// Switches to the Messages tab and asks it to open the given client's thread.
     func openChat(with clientID: UUID) {
         pendingChatClientID = clientID
+        pendingChatConversationID = nil
+        select(.messages)
+    }
+
+    /// Switches to the Messages tab and opens a thread by conversation ID.
+    func openChat(conversationID: UUID) {
+        pendingChatConversationID = conversationID
+        pendingChatClientID = nil
         select(.messages)
     }
 }

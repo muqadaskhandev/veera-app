@@ -9,7 +9,7 @@ func configure(_ app: Application) async throws {
     app.middleware.use(CORSMiddleware(configuration: .init(
         allowedOrigin: .all,
         allowedMethods: [.GET, .POST, .PATCH, .PUT, .DELETE, .OPTIONS],
-        allowedHeaders: [.accept, .authorization, .contentType, .origin]
+        allowedHeaders: [.accept, .authorization, .contentType, .origin, .upgrade, .connection, .secWebSocketKey, .secWebSocketVersion, .secWebSocketProtocol]
     )))
 
     let jwtSecret = Environment.get("JWT_SECRET") ?? "verra-local-dev-secret-change-me"
@@ -38,7 +38,10 @@ func configure(_ app: Application) async throws {
     app.migrations.add(CreateSession())
     app.migrations.add(CreateConversation())
     app.migrations.add(CreateMessage())
+    app.migrations.add(EnhanceChatMessaging())
+    app.migrations.add(CreatePushDeviceToken())
     app.migrations.add(CreateUser())
+    app.migrations.add(AddLastSeenToUser())
     app.migrations.add(CreateAuthSession())
     app.migrations.add(CreatePasswordResetToken())
     app.migrations.add(CreateInviteCode())
@@ -64,6 +67,14 @@ func configure(_ app: Application) async throws {
         app.logger.warning("SES is not configured — verification emails are logged locally in development")
     } else {
         app.logger.warning("SES is not configured — email delivery will fail in production")
+    }
+
+    if APNsService.isConfigured(on: app) {
+        app.logger.info("Apple Push Notification service is enabled")
+    } else if app.environment == .development {
+        app.logger.warning("APNs is not configured — background push will not be delivered")
+    } else {
+        app.logger.warning("APNs is not configured — background push will fail in production")
     }
 
     try routes(app)
