@@ -4,6 +4,8 @@ import Vapor
 struct ClientController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let clients = routes.grouped("api", "clients")
+            .grouped(JWTAuthMiddleware())
+
         clients.get(use: index)
         clients.post(use: create)
         clients.get(":clientID", use: show)
@@ -13,26 +15,36 @@ struct ClientController: RouteCollection {
 
     @Sendable
     func index(req: Request) async throws -> [ClientDTO] {
+        let user = try req.auth.require(User.self)
         let archived = req.query[Bool.self, at: "archived"] ?? false
-        return try await Client.query(on: req.db)
+
+        var query = Client.query(on: req.db)
             .filter(\.$isArchived == archived)
             .sort(\.$name, .ascending)
-            .all()
-            .map(ClientDTO.init)
+
+        if user.userRole != .admin {
+            guard let trainer = try await Trainer.query(on: req.db)
+                .filter(\.$user.$id == user.id!)
+                .first() else {
+                throw Abort(.notFound, reason: "Trainer profile not found")
+            }
+            query = query.filter(\.$trainer.$id == trainer.id!)
+        }
+
+        return try await query.all().map(ClientDTO.init)
     }
 
     @Sendable
     func show(req: Request) async throws -> ClientDTO {
-        guard let client = try await Client.find(req.parameters.get("clientID"), on: req.db) else {
-            throw Abort(.notFound)
-        }
+        let client = try await requireClient(req)
         return try ClientDTO(from: client)
     }
 
     @Sendable
     func create(req: Request) async throws -> ClientDTO {
+        let user = try req.auth.require(User.self)
         let payload = try req.content.decode(CreateClientRequest.self)
-        let trainer = try await TrainerService.defaultTrainer(on: req.db)
+        let trainer = try await trainer(for: user, on: req.db)
 
         let initials = payload.initials ?? Self.initials(from: payload.name)
         let client = Client(
@@ -59,10 +71,7 @@ struct ClientController: RouteCollection {
 
     @Sendable
     func update(req: Request) async throws -> ClientDTO {
-        guard let client = try await Client.find(req.parameters.get("clientID"), on: req.db) else {
-            throw Abort(.notFound)
-        }
-
+        let client = try await requireClient(req)
         let payload = try req.content.decode(UpdateClientRequest.self)
         if let name = payload.name { client.name = name }
         if let initials = payload.initials { client.initials = initials }
@@ -87,11 +96,39 @@ struct ClientController: RouteCollection {
 
     @Sendable
     func delete(req: Request) async throws -> HTTPStatus {
+        let client = try await requireClient(req)
+        try await client.delete(on: req.db)
+        return .noContent
+    }
+
+    private func requireClient(_ req: Request) async throws -> Client {
+        let user = try req.auth.require(User.self)
         guard let client = try await Client.find(req.parameters.get("clientID"), on: req.db) else {
             throw Abort(.notFound)
         }
-        try await client.delete(on: req.db)
-        return .noContent
+
+        if user.userRole != .admin {
+            guard let trainer = try await Trainer.query(on: req.db)
+                .filter(\.$user.$id == user.id!)
+                .first(),
+                client.$trainer.id == trainer.id else {
+                throw Abort(.forbidden)
+            }
+        }
+
+        return client
+    }
+
+    private func trainer(for user: User, on database: any Database) async throws -> Trainer {
+        if user.userRole == .admin {
+            return try await TrainerService.defaultTrainer(on: database)
+        }
+        guard let trainer = try await Trainer.query(on: database)
+            .filter(\.$user.$id == user.id!)
+            .first() else {
+            throw Abort(.notFound, reason: "Trainer profile not found")
+        }
+        return trainer
     }
 
     private static func initials(from name: String) -> String {

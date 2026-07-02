@@ -22,6 +22,9 @@ final class InviteCode: Model, @unchecked Sendable {
     @OptionalParent(key: "client_id")
     var client: Client?
 
+    @OptionalField(key: "invited_email")
+    var invitedEmail: String?
+
     @OptionalField(key: "expires_at")
     var expiresAt: Date?
 
@@ -77,5 +80,12 @@ struct ValidateInviteResponse: Content {
     let valid: Bool
     let trainerName: String?
     let trainerID: UUID?
+    let invitedEmail: String?
     let message: String?
+}
+
+struct RedeemInviteResponse: Content {
+    let message: String
+    let trainerName: String
+    let profile: ProfileResponse
 }

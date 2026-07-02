@@ -118,7 +118,10 @@ enum ProfileLoader {
         }
         if let linked = response.linkedTrainer {
             account.coachProfile = await trainerProfile(from: linked)
+        } else {
+            account.coachProfile = TrainerProfile.empty
         }
+        account.hasLinkedTrainer = response.linkedTrainer != nil
         account.isLoaded = true
     }
 

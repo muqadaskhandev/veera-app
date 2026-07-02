@@ -9,8 +9,19 @@ final class ClientAccountStore {
     var avatarURL: String?
     var client: Client?
     var coachProfile = TrainerProfile.empty
+    var hasLinkedTrainer = false
     var isLoaded = false
     var isSaving = false
+
+    @MainActor
+    func redeemInvite(code: String) async throws -> String {
+        guard let token = AuthStore.accessToken else {
+            throw APIError.server("Not signed in")
+        }
+        let response = try await VerraAPI.redeemInvite(code: code, accessToken: token)
+        await ProfileLoader.applyClientProfile(response.profile, to: self)
+        return response.message
+    }
 
     @MainActor
     func refreshFromServer() async {

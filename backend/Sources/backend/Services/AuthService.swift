@@ -17,6 +17,15 @@ enum AuthService {
         try await assertRoleAllowed(role, adminSetupSecret: adminSetupSecret)
 
         let normalizedEmail = email.lowercased()
+
+        if role == .client, let inviteCode, !inviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try await InviteService.assertSignupEmailMatchesInvite(
+                signupEmail: normalizedEmail,
+                inviteCode: inviteCode,
+                on: request.db
+            )
+        }
+
         if let existing = try await User.query(on: request.db).filter(\.$email == normalizedEmail).first() {
             if existing.isEmailVerified {
                 throw Abort(.conflict, reason: "Email already registered")
@@ -153,6 +162,15 @@ enum AuthService {
             displayName: displayName ?? claims.email ?? "Verra User",
             isEmailVerified: true
         )
+
+        if role == .client, let inviteCode, !inviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try await InviteService.assertSignupEmailMatchesInvite(
+                signupEmail: user.email ?? "",
+                inviteCode: inviteCode,
+                on: request.db
+            )
+        }
+
         try await user.save(on: request.db)
 
         switch role {
@@ -206,6 +224,15 @@ enum AuthService {
             displayName: displayName ?? info.email ?? "Verra User",
             isEmailVerified: info.isEmailVerified
         )
+
+        if role == .client, let inviteCode, !inviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try await InviteService.assertSignupEmailMatchesInvite(
+                signupEmail: user.email ?? "",
+                inviteCode: inviteCode,
+                on: request.db
+            )
+        }
+
         try await user.save(on: request.db)
 
         switch role {
@@ -299,30 +326,48 @@ enum AuthService {
             throw Abort(.badRequest, reason: "Invalid or expired invite code")
         }
 
-        let trainer = try await invite.$trainer.get(on: database)
-        let client = Client(
-            trainerID: try trainer.requireID(),
-            name: displayName,
-            initials: initials(from: displayName),
-            sessionsRemaining: 0,
-            status: "pending",
-            primaryGoal: primaryGoal
-        )
-        client.$user.id = try user.requireID()
-        try await client.save(on: database)
+        try await InviteService.assertEmailMatchesInvite(userEmail: user.email, invite: invite, on: database)
 
-        let profile = Profile(
-            userID: try user.requireID(),
-            displayName: displayName,
-            title: "",
-            bio: "",
-            specialtiesJSON: "[]"
-        )
-        try await profile.save(on: database)
+        let trainer = try await invite.$trainer.get(on: database)
+        let userID = try user.requireID()
+        let client: Client
+
+        if let pendingClientID = invite.$client.id,
+           let pendingClient = try await Client.find(pendingClientID, on: database) {
+            if let linkedUserID = pendingClient.$user.id, linkedUserID != userID {
+                throw Abort(.conflict, reason: "This invite is already linked to another account")
+            }
+            pendingClient.$user.id = userID
+            if !primaryGoal.isEmpty {
+                pendingClient.primaryGoal = primaryGoal
+            }
+            if pendingClient.email.isEmpty, let email = user.email {
+                pendingClient.email = email
+            }
+            if pendingClient.status == "pending" {
+                pendingClient.status = "active"
+            }
+            try await pendingClient.save(on: database)
+            client = pendingClient
+        } else {
+            let newClient = Client(
+                trainerID: try trainer.requireID(),
+                name: displayName,
+                initials: initials(from: displayName),
+                sessionsRemaining: 0,
+                status: "pending",
+                primaryGoal: primaryGoal
+            )
+            newClient.$user.id = userID
+            try await newClient.save(on: database)
+            client = newClient
+            invite.$client.id = try client.requireID()
+        }
+
+        _ = try await ProfileService.getOrCreate(for: user, on: database)
 
         invite.redeemedAt = Date()
-        invite.$redeemedByUser.id = try user.requireID()
-        invite.$client.id = try client.requireID()
+        invite.$redeemedByUser.id = userID
         try await invite.save(on: database)
     }
 

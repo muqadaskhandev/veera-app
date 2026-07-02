@@ -18,9 +18,22 @@ enum ClientSort: String, CaseIterable, Identifiable {
 @Observable
 final class ClientStore {
     var clients: [Client]
+    var isLoadedFromServer = false
 
     init(clients: [Client] = Client.roster) {
         self.clients = clients
+    }
+
+    @MainActor
+    func refreshFromServer() async {
+        guard let token = AuthStore.accessToken else { return }
+        do {
+            let dtos = try await VerraAPI.fetchClients(accessToken: token)
+            clients = dtos.map(ClientLoader.client(from:))
+            isLoadedFromServer = true
+        } catch {
+            // Keep existing roster when offline.
+        }
     }
 
     /// Active (non-archived) clients only.

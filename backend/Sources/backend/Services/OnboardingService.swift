@@ -99,14 +99,7 @@ enum OnboardingService {
             throw Abort(.badRequest, reason: "Invite code is required")
         }
 
-        let displayName = payload.displayName ?? user.displayName
-        try await AuthService.linkClientToInvite(
-            user: user,
-            inviteCode: inviteCode,
-            displayName: displayName,
-            primaryGoal: payload.primaryGoal ?? "",
-            on: database
-        )
+        _ = try await InviteService.redeem(code: inviteCode, for: user, on: database)
 
         guard let client = try await Client.query(on: database).filter(\.$user.$id == user.id!).first() else {
             throw Abort(.internalServerError, reason: "Client profile was not created")

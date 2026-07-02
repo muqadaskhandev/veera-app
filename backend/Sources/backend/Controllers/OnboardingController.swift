@@ -17,6 +17,7 @@ struct OnboardingController: RouteCollection {
 
         let client = onboarding.grouped(RoleGuardMiddleware(.client))
         client.post("client", use: completeClientOnboarding)
+        client.post("client", "invite", use: redeemClientInvite)
     }
 
     @Sendable
@@ -51,6 +52,20 @@ struct OnboardingController: RouteCollection {
         let user = try req.auth.require(User.self)
         let payload = try req.content.decode(ClientOnboardingRequest.self)
         return try await OnboardingService.completeClientOnboarding(for: user, payload: payload, on: req.db)
+    }
+
+    @Sendable
+    func redeemClientInvite(req: Request) async throws -> RedeemInviteResponse {
+        let user = try req.auth.require(User.self)
+        struct RedeemInviteRequest: Content { var code: String }
+        let payload = try req.content.decode(RedeemInviteRequest.self)
+        let profile = try await InviteService.redeem(code: payload.code, for: user, on: req.db)
+        let trainerName = profile.linkedTrainer?.name ?? "your trainer"
+        return RedeemInviteResponse(
+            message: "Connected to \(trainerName)",
+            trainerName: trainerName,
+            profile: profile
+        )
     }
 
     @Sendable

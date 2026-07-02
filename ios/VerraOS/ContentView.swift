@@ -84,6 +84,7 @@ struct ContentView: View {
         }
         .task {
             await trainer.refreshFromServer()
+            await clients.refreshFromServer()
         }
     }
 

@@ -13,6 +13,7 @@ struct ClientDashboardView: View {
     let clientID: UUID
     /// Opens the read-only trainer profile from the "Your Trainer" card.
     var onViewTrainer: () -> Void = {}
+    var onConnectTrainer: () -> Void = {}
 
     @Environment(ClientStore.self) private var clientStore
     @Environment(ProfileStore.self) private var profile
@@ -68,7 +69,11 @@ struct ClientDashboardView: View {
                 identityHeader(client)
                 biometrics(client)
                 sessionBank(client)
-                trainerCard
+                if account.hasLinkedTrainer {
+                    trainerCard
+                } else {
+                    connectTrainerBanner
+                }
                 if !client.note.isEmpty { coachNote(client) }
                 moduleGrid(client)
             }
@@ -185,6 +190,43 @@ struct ClientDashboardView: View {
     }
 
     // MARK: Your trainer
+
+    private var connectTrainerBanner: some View {
+        Button(action: onConnectTrainer) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Theme.Color.accent.opacity(0.18))
+                        .frame(width: 50, height: 50)
+                    Image(systemName: "ticket.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Theme.Color.accentInk)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("CONNECT YOUR COACH")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(Theme.Color.inkFaint)
+                    Text("Got an invite code?")
+                        .font(.system(size: 16.5, weight: .bold))
+                        .foregroundStyle(Theme.Color.ink)
+                    Text("Link your trainer to see their profile and sessions.")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Theme.Color.inkMuted)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 6)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Theme.Color.inkFaint)
+            }
+            .padding(Theme.Spacing.md)
+            .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.accent.opacity(0.35), lineWidth: 1))
+            .cardShadow(0.5)
+        }
+        .buttonStyle(.plain)
+    }
 
     private var trainerCard: some View {
         Button(action: onViewTrainer) {

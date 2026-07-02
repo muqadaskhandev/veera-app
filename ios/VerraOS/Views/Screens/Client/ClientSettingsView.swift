@@ -11,18 +11,25 @@ import SwiftUI
 
 struct ClientSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(ClientAccountStore.self) private var account
 
     let unit: WeightUnit
     var onSelectUnit: (WeightUnit) -> Void = { _ in }
     var onLogOut: () -> Void = {}
     var onDeleteAccount: () -> Void = {}
+    var onTrainerLinked: () -> Void = {}
 
     @State private var confirmingDelete = false
+    @State private var showingRedeemInvite = false
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: Theme.Spacing.sm) {
+                    if !account.hasLinkedTrainer {
+                        connectTrainerCard
+                    }
+
                     unitsCard
 
                     logOutCard
@@ -45,7 +52,45 @@ struct ClientSettingsView: View {
                         .foregroundStyle(Theme.Color.ink)
                 }
             }
+            .sheet(isPresented: $showingRedeemInvite) {
+                ClientRedeemInviteSheet(account: account) {
+                    showingRedeemInvite = false
+                    onTrainerLinked()
+                }
+            }
         }
+    }
+
+    private var connectTrainerCard: some View {
+        Button {
+            showingRedeemInvite = true
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(Theme.Color.accent.opacity(0.18)).frame(width: 44, height: 44)
+                    Image(systemName: "ticket.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Theme.Color.accentInk)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Connect to Trainer")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.Color.ink)
+                    Text("Enter an invite code from your coach")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.Color.inkMuted)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.Color.inkFaint)
+            }
+            .padding(Theme.Spacing.md)
+            .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+            .cardShadow()
+        }
+        .buttonStyle(.plain)
     }
 
     private var unitsCard: some View {

@@ -69,6 +69,8 @@ private enum PreviewMock {
 
 struct OnboardingView: View {
     let role: OnboardingRole
+    /// Called when the user backs out of the first screen to return to the welcome screen.
+    var onDismiss: () -> Void = {}
     /// Called when the flow finishes (or is skipped). Carries the collected
     /// profile name and, for clients, their primary goal. The redesigned flow
     /// no longer collects these, so both are passed empty.
@@ -78,6 +80,8 @@ struct OnboardingView: View {
     @State private var appeared = false
     @State private var answers: [String: String] = [:]
     @State private var inviteCode = ""
+    @State private var validatedInviteCode: String?
+    @State private var invitedEmailForCode: String?
     @State private var notificationsResolved = false
     @State private var notificationsDenied = false
     @State private var agreedToComms = true
@@ -114,7 +118,6 @@ struct OnboardingView: View {
             return [.invite, .register]
         }
         return [
-            .invite,
             .preview(
                 mock: .clientProfile,
                 page: 0,
@@ -212,6 +215,13 @@ struct OnboardingView: View {
     private var current: OBScreen { screens[index] }
     private var isFirst: Bool { index == 0 }
 
+    /// First onboarding screen where back returns to the welcome screen.
+    private var showsWelcomeBack: Bool {
+        guard isFirst else { return false }
+        if role == .trainer, case .preview = current { return true }
+        return false
+    }
+
     // MARK: Body
 
     var body: some View {
@@ -300,6 +310,10 @@ struct OnboardingView: View {
         }
     }
 
+    private var isInviteEntryScreen: Bool {
+        !showingLogin && !showingForgotPassword && !showingResetPassword && !showingEmailCodeEntry
+    }
+
     // MARK: Content
 
     @ViewBuilder
@@ -344,19 +358,45 @@ struct OnboardingView: View {
                 Seg("invite code", accent: true),
                 Seg("?"),
             ])
-            Text(role == .client
-                ? "Enter the code from your trainer, then create your account on the next screen. No code? You can still sign up."
-                : "Enter the code from your trainer or studio. No code? You can skip this for now.")
+            Text("Enter the code from your trainer, then create your account on the next screen. No code? You can still sign up.")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
                 .padding(.top, 14)
 
-            InviteCodeField(code: $inviteCode)
+            InviteCodeField(code: $inviteCode, style: .onboarding)
                 .padding(.top, 28)
+                .onChange(of: inviteCode) { _, _ in
+                    validatedInviteCode = nil
+                    invitedEmailForCode = nil
+                }
+
+            if let invitedEmailForCode {
+                inviteEmailHint(invitedEmailForCode)
+                    .padding(.top, 14)
+            }
 
             Spacer()
             Spacer()
         }
+    }
+
+    private func inviteEmailHint(_ email: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "envelope.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.Color.accent)
+                .padding(.top, 2)
+            Text("On the next screen, sign up with \(email) — that's the email this invite was sent to.")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.75))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.md)
+                .stroke(Theme.Color.accent.opacity(0.35), lineWidth: 1)
+        )
     }
 
     private var loginBody: some View {
@@ -773,6 +813,11 @@ struct OnboardingView: View {
             .textCase(.uppercase)
             .fixedSize(horizontal: false, vertical: true)
 
+            if let invitedEmailForCode, validatedInviteCode != nil {
+                inviteEmailHint(invitedEmailForCode)
+                    .padding(.top, 18)
+            }
+
             VStack(spacing: 14) {
                 AppleSignInButton(isDisabled: isSaving) { result in
                     Task { await handleAppleSignInResult(result, isLogin: false) }
@@ -967,7 +1012,7 @@ struct OnboardingView: View {
                 }
             } else {
                 VStack(spacing: 14) {
-                    controlRow(label: "Continue")
+                    inviteControlRow(label: "Continue")
                     Button {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             showingLogin = true
@@ -1008,7 +1053,23 @@ struct OnboardingView: View {
 
     private func controlRow(label: String) -> some View {
         HStack(spacing: 14) {
-            if !isFirst { backButton }
+            if !isFirst || showsWelcomeBack { backButton }
+            Button(action: advance) {
+                Text(label)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(canAdvance ? Theme.Color.accentInk : Theme.Color.accentInk.opacity(0.35))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background((canAdvance ? Theme.Color.accent : Theme.Color.accent.opacity(0.35)), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canAdvance || isSaving)
+        }
+    }
+
+    private func inviteControlRow(label: String) -> some View {
+        HStack(spacing: 14) {
+            backButton
             Button(action: advance) {
                 Text(label)
                     .font(.system(size: 18, weight: .bold, design: .rounded))
@@ -1071,8 +1132,12 @@ struct OnboardingView: View {
             let response = try await VerraAPI.validateInvite(code: code)
             guard response.valid else {
                 saveError = response.message ?? "Invalid or expired invite code"
+                validatedInviteCode = nil
+                invitedEmailForCode = nil
                 return
             }
+            invitedEmailForCode = response.invitedEmail
+            validatedInviteCode = code
             advanceToNextScreen()
         } catch {
             saveError = error.localizedDescription
@@ -1111,6 +1176,14 @@ struct OnboardingView: View {
                 loginEmail = ""
                 loginPassword = ""
             }
+            return
+        }
+        if case .invite = current, isInviteEntryScreen {
+            onDismiss()
+            return
+        }
+        if showsWelcomeBack {
+            onDismiss()
             return
         }
         guard index > 0 else { return }
@@ -1253,6 +1326,14 @@ struct OnboardingView: View {
         do {
             let name = registerName.trimmingCharacters(in: .whitespaces)
             let email = registerEmail.trimmingCharacters(in: .whitespaces).lowercased()
+
+            do {
+                try await assertSignupEmailMatchesInvite(email)
+            } catch {
+                saveError = error.localizedDescription
+                return
+            }
+
             let response: RegisterResponse
 
             switch role {
@@ -1267,7 +1348,7 @@ struct OnboardingView: View {
                     email: email,
                     password: registerPassword,
                     displayName: name,
-                    inviteCode: inviteCode.isEmpty ? nil : inviteCode
+                    inviteCode: validatedInviteCode
                 )
             }
 
@@ -1499,11 +1580,20 @@ struct OnboardingView: View {
             let fallbackName = registerName.trimmingCharacters(in: .whitespaces)
             let displayName = apple.displayName ?? (fallbackName.isEmpty ? nil : fallbackName)
 
+            if !isLogin {
+                do {
+                    try await assertSignupEmailMatchesInvite(apple.email ?? "")
+                } catch {
+                    saveError = error.localizedDescription
+                    return
+                }
+            }
+
             let auth = try await VerraAPI.signInWithApple(
                 identityToken: apple.identityToken,
                 role: role,
                 displayName: isLogin ? nil : displayName,
-                inviteCode: inviteCode.isEmpty ? nil : inviteCode
+                inviteCode: isLogin ? nil : validatedInviteCode
             )
 
             if isLogin {
@@ -1548,6 +1638,49 @@ struct OnboardingView: View {
             return description
         }
         return error.localizedDescription
+    }
+
+    private func inviteEmailMismatchMessage(invitedEmail: String) -> String {
+        "This isn't the email for this code. Please use \(invitedEmail) — that's the address your trainer invited."
+    }
+
+    @MainActor
+    private func assertSignupEmailMatchesInvite(_ email: String) async throws {
+        guard let code = validatedInviteCode, !code.isEmpty else { return }
+
+        let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var invited = invitedEmailForCode?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if invited == nil || invited?.isEmpty == true {
+            let response = try await VerraAPI.validateInvite(code: code)
+            guard response.valid else {
+                throw NSError(
+                    domain: "VerraInvite",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: response.message ?? "Invalid or expired invite code"]
+                )
+            }
+            invited = response.invitedEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            invitedEmailForCode = response.invitedEmail
+        }
+
+        guard let invited, !invited.isEmpty else { return }
+
+        guard !normalized.isEmpty else {
+            throw NSError(
+                domain: "VerraInvite",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: inviteEmailMismatchMessage(invitedEmail: invited) + " Use Continue with Email to sign up with that address."]
+            )
+        }
+
+        guard normalized == invited else {
+            throw NSError(
+                domain: "VerraInvite",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: inviteEmailMismatchMessage(invitedEmail: invited)]
+            )
+        }
     }
 
     private func headlineText(_ segs: [Seg], size: CGFloat = 34) -> some View {
@@ -1675,35 +1808,6 @@ private struct OptionCard: View {
             )
         }
         .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Invite code field
-
-private struct InviteCodeField: View {
-    @Binding var code: String
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "ticket.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(Theme.Color.accent)
-            TextField("", text: $code, prompt: Text("INVITE CODE").foregroundColor(.white.opacity(0.4)))
-                .focused($focused)
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-                .tracking(2)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 18)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.md)
-                .stroke(focused ? Theme.Color.accent : .white.opacity(0.18), lineWidth: 1)
-        )
     }
 }
 

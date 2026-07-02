@@ -57,9 +57,16 @@ struct RootView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
-            if let onboardingRole {
-                OnboardingView(role: onboardingRole) { name, goal in
-                    completeOnboarding(for: onboardingRole, name: name, goal: goal)
+            if let activeOnboardingRole = onboardingRole {
+                OnboardingView(
+                    role: activeOnboardingRole,
+                    onDismiss: {
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            onboardingRole = nil
+                        }
+                    }
+                ) { name, goal in
+                    completeOnboarding(for: activeOnboardingRole, name: name, goal: goal)
                 }
                 .transition(.opacity)
                 .zIndex(1)

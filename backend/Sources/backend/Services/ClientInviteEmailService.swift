@@ -5,11 +5,21 @@ struct CreateInviteRequest: Content {
     var expiresInDays: Int?
     var clientEmail: String?
     var clientName: String?
+    var clientPhone: String?
+    var sessionsRemaining: Int?
+    var age: Int?
+    var gender: String?
+    var heightCm: Int?
+    var weightKg: Int?
+    var injuryHistory: String?
+    var primaryGoal: String?
+    var skillLevel: String?
 }
 
 struct InviteCreatedResponse: Content {
     let invite: InviteCodeDTO
     let emailSent: Bool
+    let client: ClientDTO?
 }
 
 enum ClientInviteEmailService {

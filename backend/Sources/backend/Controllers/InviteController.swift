@@ -49,6 +49,24 @@ struct InviteController: RouteCollection {
             on: req.db
         )
 
+        var savedClient: Client?
+        if let pendingClient = try await InviteService.createPendingClient(
+            for: trainer,
+            payload: payload,
+            on: req.db
+        ) {
+            invite.$client.id = try pendingClient.requireID()
+            savedClient = pendingClient
+        }
+
+        if let rawEmail = payload.clientEmail?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !rawEmail.isEmpty {
+            invite.invitedEmail = try ClientInviteEmailService.normalizeEmail(rawEmail)
+            try await invite.save(on: req.db)
+        } else if savedClient != nil {
+            try await invite.save(on: req.db)
+        }
+
         var emailSent = false
         if let rawEmail = payload.clientEmail, !rawEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let email = try ClientInviteEmailService.normalizeEmail(rawEmail)
@@ -63,9 +81,15 @@ struct InviteController: RouteCollection {
             emailSent = true
         }
 
+        var clientDTO: ClientDTO?
+        if let savedClient {
+            clientDTO = try ClientDTO(from: savedClient)
+        }
+
         return InviteCreatedResponse(
             invite: try InviteCodeDTO(from: invite),
-            emailSent: emailSent
+            emailSent: emailSent,
+            client: clientDTO
         )
     }
 }

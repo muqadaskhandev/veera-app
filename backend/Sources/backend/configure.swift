@@ -42,6 +42,7 @@ func configure(_ app: Application) async throws {
     app.migrations.add(CreateAuthSession())
     app.migrations.add(CreatePasswordResetToken())
     app.migrations.add(CreateInviteCode())
+    app.migrations.add(AddInvitedEmailToInviteCode())
     app.migrations.add(CreateTrainerOnboarding())
     app.migrations.add(AddUserForeignKeys())
     app.migrations.add(CreateEmailVerificationCode())

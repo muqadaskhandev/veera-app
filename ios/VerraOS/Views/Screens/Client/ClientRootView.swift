@@ -72,6 +72,7 @@ struct ClientRootView: View {
     @State private var showingEditDetails = false
     @State private var showingHelp = false
     @State private var showingSettings = false
+    @State private var showingRedeemInvite = false
     @State private var showLogOutConfirm = false
 
     private var client: Client {
@@ -166,8 +167,15 @@ struct ClientRootView: View {
                 unit: trainer.units,
                 onSelectUnit: { trainer.units = $0 },
                 onLogOut: onLogOut,
-                onDeleteAccount: onLogOut
+                onDeleteAccount: onLogOut,
+                onTrainerLinked: syncFromAccount
             )
+            .environment(account)
+        }
+        .sheet(isPresented: $showingRedeemInvite) {
+            ClientRedeemInviteSheet(account: account) {
+                syncFromAccount()
+            }
         }
         .confirmationDialog("Log out of VerraOS?", isPresented: $showLogOutConfirm, titleVisibility: .visible) {
             Button("Log Out", role: .destructive) { onLogOut() }
@@ -216,7 +224,11 @@ struct ClientRootView: View {
             ZStack {
                 switch tab {
                 case .dashboard:
-                    ClientDashboardView(clientID: client.id, onViewTrainer: { showingTrainerProfile = true })
+                    ClientDashboardView(
+                        clientID: client.id,
+                        onViewTrainer: { showingTrainerProfile = true },
+                        onConnectTrainer: { showingRedeemInvite = true }
+                    )
                 case .schedule:
                     ClientScheduleView(clientName: client.name)
                 case .wearables:

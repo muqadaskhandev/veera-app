@@ -235,63 +235,57 @@ struct AddClientView: View {
 
     private func invite() {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
-        let initials = Self.initials(from: trimmed)
         let contactValue = contact.trimmingCharacters(in: .whitespaces)
 
         Task {
             isInviting = true
             defer { isInviting = false }
 
-            var emailSent = false
-            if channel == .email, let token = AuthStore.accessToken {
-                do {
-                    let response = try await VerraAPI.createInvite(
-                        clientEmail: contactValue,
-                        clientName: trimmed,
-                        accessToken: token
-                    )
-                    emailSent = response.emailSent
-                } catch {
-                    onInvited("Invite saved locally — email could not be sent")
-                    addLocalClient(name: trimmed, initials: initials, contactValue: contactValue)
-                    dismiss()
-                    return
+            guard let token = AuthStore.accessToken else {
+                onInvited("Sign in again to send invites")
+                return
+            }
+
+            do {
+                let response = try await VerraAPI.createInvite(
+                    clientEmail: channel == .email ? contactValue : nil,
+                    clientName: trimmed,
+                    clientPhone: channel == .sms ? contactValue : nil,
+                    sessionsRemaining: preFill ? sessionBalance : 0,
+                    age: preFill ? Int(age) : nil,
+                    gender: preFill && !gender.isEmpty ? gender : nil,
+                    heightCm: preFill ? Int(height) : nil,
+                    weightKg: preFill ? weightInKg : nil,
+                    injuryHistory: preFill && !injuries.isEmpty ? injuries : nil,
+                    primaryGoal: preFill && !goal.isEmpty ? goal : nil,
+                    skillLevel: preFill ? skill : nil,
+                    accessToken: token
+                )
+
+                if let saved = response.client {
+                    let client = ClientLoader.client(from: saved)
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                        if let index = store.clients.firstIndex(where: { $0.id == client.id }) {
+                            store.clients[index] = client
+                        } else {
+                            store.add(client)
+                        }
+                    }
+                } else {
+                    await store.refreshFromServer()
                 }
+
+                if channel == .email && response.emailSent {
+                    onInvited("Invite email sent to \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed)")
+                } else if channel == .email {
+                    onInvited("Invite created for \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed)")
+                } else {
+                    onInvited("Invite saved for \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed) — share the code via \(channel.label)")
+                }
+                dismiss()
+            } catch {
+                onInvited("Could not save invite — \(error.localizedDescription)")
             }
-
-            addLocalClient(name: trimmed, initials: initials, contactValue: contactValue)
-
-            if channel == .email && emailSent {
-                onInvited("Invite email sent to \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed)")
-            } else if channel == .email {
-                onInvited("Invite created for \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed)")
-            } else {
-                onInvited("Invite sent to \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed) via \(channel.label)")
-            }
-            dismiss()
-        }
-    }
-
-    private func addLocalClient(name trimmed: String, initials: String, contactValue: String) {
-        let client = Client(
-            name: trimmed,
-            initials: initials,
-            sessionsRemaining: preFill ? sessionBalance : 0,
-            daysLeftOnPlan: 30,
-            status: .pending,
-            email: channel == .email ? contactValue : "",
-            phone: channel == .sms ? contactValue : "",
-            age: preFill ? Int(age) : nil,
-            gender: preFill ? gender : "",
-            heightCm: preFill ? Int(height) : nil,
-            weightKg: preFill ? weightInKg : nil,
-            injuryHistory: preFill ? injuries : "",
-            primaryGoal: preFill ? goal : "",
-            skillLevel: preFill ? skill : ""
-        )
-
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-            store.add(client)
         }
     }
 

@@ -18,7 +18,14 @@ struct ValidateInviteResponse: Codable {
     let valid: Bool
     let trainerName: String?
     let trainerID: UUID?
+    let invitedEmail: String?
     let message: String?
+}
+
+struct RedeemInviteResponse: Codable {
+    let message: String
+    let trainerName: String
+    let profile: ProfileResponse
 }
 
 struct TrainerOnboardingResponse: Codable {
@@ -179,6 +186,15 @@ enum VerraAPI {
         )
     }
 
+    static func redeemInvite(code: String, accessToken: String) async throws -> RedeemInviteResponse {
+        try await APIClient.shared.request(
+            "/api/onboarding/client/invite",
+            method: "POST",
+            body: ValidateInviteBody(code: code),
+            token: accessToken
+        )
+    }
+
     static func saveTrainerOnboarding(
         answers: [String: String],
         accessToken: String
@@ -335,11 +351,21 @@ enum VerraAPI {
         let expiresInDays: Int?
         let clientEmail: String?
         let clientName: String?
+        let clientPhone: String?
+        let sessionsRemaining: Int?
+        let age: Int?
+        let gender: String?
+        let heightCm: Int?
+        let weightKg: Int?
+        let injuryHistory: String?
+        let primaryGoal: String?
+        let skillLevel: String?
     }
 
     struct InviteCreatedResponse: Decodable {
         let invite: InviteCodeDTO
         let emailSent: Bool
+        let client: ClientDTO?
     }
 
     struct InviteCodeDTO: Decodable {
@@ -351,9 +377,25 @@ enum VerraAPI {
         let isRedeemable: Bool
     }
 
+    static func fetchClients(accessToken: String, archived: Bool = false) async throws -> [ClientDTO] {
+        try await APIClient.shared.request(
+            "/api/clients?archived=\(archived)",
+            token: accessToken
+        )
+    }
+
     static func createInvite(
         clientEmail: String?,
         clientName: String?,
+        clientPhone: String? = nil,
+        sessionsRemaining: Int? = nil,
+        age: Int? = nil,
+        gender: String? = nil,
+        heightCm: Int? = nil,
+        weightKg: Int? = nil,
+        injuryHistory: String? = nil,
+        primaryGoal: String? = nil,
+        skillLevel: String? = nil,
         expiresInDays: Int? = 30,
         accessToken: String
     ) async throws -> InviteCreatedResponse {
@@ -363,7 +405,16 @@ enum VerraAPI {
             body: CreateInviteBody(
                 expiresInDays: expiresInDays,
                 clientEmail: clientEmail,
-                clientName: clientName
+                clientName: clientName,
+                clientPhone: clientPhone,
+                sessionsRemaining: sessionsRemaining,
+                age: age,
+                gender: gender,
+                heightCm: heightCm,
+                weightKg: weightKg,
+                injuryHistory: injuryHistory,
+                primaryGoal: primaryGoal,
+                skillLevel: skillLevel
             ),
             token: accessToken
         )
