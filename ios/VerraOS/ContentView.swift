@@ -125,7 +125,7 @@ struct ContentView: View {
             .transition(.opacity)
 
             if !app.isChatThreadOpen {
-                BottomTabBar(selected: app.selectedTab) { tab in
+                BottomTabBar(selected: app.selectedTab, messagesUnreadCount: messages.unreadCount) { tab in
                     app.select(tab)
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))

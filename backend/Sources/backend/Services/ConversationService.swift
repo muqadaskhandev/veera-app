@@ -163,7 +163,18 @@ enum ConversationService {
         let rows = try await query.all()
         let hasMore = rows.count > pageSize
         let slice = hasMore ? Array(rows.prefix(pageSize)) : rows
-        let dtos = try slice.map { try MessageDTO(from: $0, viewerUserID: viewerID) }
+        let delivered = try await markDelivered(
+            conversationID: conversationIDValue,
+            recipientUserID: viewerID,
+            on: database
+        )
+        var dtos = try slice.map { try MessageDTO(from: $0, viewerUserID: viewerID) }
+        for update in delivered {
+            guard let id = update.id else { continue }
+            if let index = dtos.firstIndex(where: { $0.id == id }) {
+                dtos[index] = try MessageDTO(from: update, viewerUserID: viewerID)
+            }
+        }
         return MessagesPageResponse(messages: dtos.reversed(), hasMore: hasMore)
     }
 
@@ -184,6 +195,14 @@ enum ConversationService {
             throw Abort(.badRequest, reason: "Message kind is required")
         }
 
+        var initialStatus = "sent"
+        let participants = try await participantUserIDs(conversationID: conversationID, on: database)
+        let recipients = participants.filter { $0 != userID }
+        for recipient in recipients where await ChatHub.shared.isUserOnline(recipient) {
+            initialStatus = "delivered"
+            break
+        }
+
         let message = Message(
             conversationID: try conversation.requireID(),
             senderUserID: userID,
@@ -191,7 +210,7 @@ enum ConversationService {
             body: body,
             isOutgoing: role == .trainer,
             attachmentURL: payload.attachmentURL,
-            status: "sent"
+            status: initialStatus
         )
         try await message.save(on: database)
 
@@ -207,8 +226,6 @@ enum ConversationService {
         try await conversation.save(on: database)
 
         let dto = try MessageDTO(from: message, viewerUserID: userID)
-        let participants = try await participantUserIDs(conversationID: conversationID, on: database)
-        let recipients = participants.filter { $0 != userID }
 
         let event = ChatEvent(type: "message.new", message: dto, conversationID: conversationID)
         await ChatHub.shared.send(toUserIDs: recipients, event: event)
@@ -237,8 +254,27 @@ enum ConversationService {
         }
         try await conversation.save(on: database)
 
-        let dto = try await ConversationDTO.make(from: conversation, viewer: user, on: database)
         let userID = try user.requireID()
+        let readMessages = try await markReadReceipts(
+            conversationID: conversationID,
+            readerUserID: userID,
+            on: database
+        )
+        for message in readMessages {
+            guard let senderID = message.$senderUser.id else { continue }
+            let messageDTO = try MessageDTO(from: message, viewerUserID: senderID)
+            await ChatHub.shared.send(
+                to: senderID,
+                event: ChatEvent(
+                    type: "message.status",
+                    message: messageDTO,
+                    conversationID: conversationID,
+                    messageID: message.id
+                )
+            )
+        }
+
+        let dto = try await ConversationDTO.make(from: conversation, viewer: user, on: database)
         let participants = try await participantUserIDs(conversationID: conversationID, on: database)
         let others = participants.filter { $0 != userID }
         await ChatHub.shared.send(
@@ -246,6 +282,36 @@ enum ConversationService {
             event: ChatEvent(type: "conversation.read", conversationID: conversationID, userID: userID)
         )
         return dto
+    }
+
+    static func markDelivered(
+        conversationID: UUID,
+        for user: User,
+        on database: any Database
+    ) async throws -> [MessageDTO] {
+        _ = try await requireConversation(conversationID, for: user, on: database)
+        let userID = try user.requireID()
+        let updated = try await markDelivered(
+            conversationID: conversationID,
+            recipientUserID: userID,
+            on: database
+        )
+        var dtos: [MessageDTO] = []
+        for message in updated {
+            guard let senderID = message.$senderUser.id else { continue }
+            let dto = try MessageDTO(from: message, viewerUserID: senderID)
+            dtos.append(dto)
+            await ChatHub.shared.send(
+                to: senderID,
+                event: ChatEvent(
+                    type: "message.status",
+                    message: dto,
+                    conversationID: conversationID,
+                    messageID: message.id
+                )
+            )
+        }
+        return dtos
     }
 
     static func setReaction(
@@ -328,6 +394,46 @@ enum ConversationService {
         }
 
         throw Abort(.forbidden)
+    }
+
+    private static func markDelivered(
+        conversationID: UUID,
+        recipientUserID: UUID,
+        on database: any Database
+    ) async throws -> [Message] {
+        let rows = try await Message.query(on: database)
+            .filter(\.$conversation.$id == conversationID)
+            .filter(\.$status == "sent")
+            .all()
+
+        var updated: [Message] = []
+        for message in rows {
+            guard message.$senderUser.id != recipientUserID else { continue }
+            message.status = "delivered"
+            try await message.save(on: database)
+            updated.append(message)
+        }
+        return updated
+    }
+
+    private static func markReadReceipts(
+        conversationID: UUID,
+        readerUserID: UUID,
+        on database: any Database
+    ) async throws -> [Message] {
+        let rows = try await Message.query(on: database)
+            .filter(\.$conversation.$id == conversationID)
+            .filter(\.$status != "read")
+            .all()
+
+        var updated: [Message] = []
+        for message in rows {
+            guard let senderID = message.$senderUser.id, senderID != readerUserID else { continue }
+            message.status = "read"
+            try await message.save(on: database)
+            updated.append(message)
+        }
+        return updated
     }
 
     private static func preview(for kind: String, body: String) -> String {

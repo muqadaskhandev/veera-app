@@ -60,7 +60,10 @@ actor ChatHub {
 
         for connectionID in ids {
             guard let connection = connections[connectionID] else { continue }
-            try? await connection.socket.send(text)
+            let socket = connection.socket
+            try? await socket.eventLoop.submit {
+                socket.send(text)
+            }.get()
         }
     }
 
@@ -101,21 +104,32 @@ enum ChatWebSocketHandler {
             return
         }
 
+        let database = req.db
         let connectionID = await ChatHub.shared.connect(userID: userID, socket: socket)
-        await PresenceService.userConnected(userID: userID, on: req.db)
 
-        socket.onText { _, text in
-            Task {
-                try? await handleIncoming(text: text, from: user, on: req)
-            }
+        do {
+            try await socket.eventLoop.submit {
+                socket.onText { _, text in
+                    Task {
+                        try? await handleIncoming(text: text, from: user, on: database)
+                    }
+                }
+                socket.onClose.whenComplete { _ in
+                    Task {
+                        await ChatHub.shared.disconnect(connectionID: connectionID, on: database)
+                    }
+                }
+            }.get()
+        } catch {
+            await ChatHub.shared.disconnect(connectionID: connectionID, on: database)
+            try? await socket.close(code: .goingAway)
+            return
         }
 
-        socket.onClose.whenComplete { _ in
-            Task { await ChatHub.shared.disconnect(connectionID: connectionID, on: req.db) }
-        }
+        await PresenceService.userConnected(userID: userID, on: database)
     }
 
-    private static func handleIncoming(text: String, from user: User, on req: Request) async throws {
+    private static func handleIncoming(text: String, from user: User, on database: any Database) async throws {
         guard let data = text.data(using: .utf8),
               let payload = try? JSONDecoder().decode(IncomingChatCommand.self, from: data) else {
             return
@@ -126,7 +140,7 @@ enum ChatWebSocketHandler {
             guard let conversationID = payload.conversationID else { return }
             let participants = try await ConversationService.participantUserIDs(
                 conversationID: conversationID,
-                on: req.db
+                on: database
             )
             let senderID = try user.requireID()
             let others = participants.filter { $0 != senderID }

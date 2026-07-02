@@ -46,6 +46,9 @@ final class Client: Model, @unchecked Sendable {
     @OptionalField(key: "weight_kg")
     var weightKg: Int?
 
+    @OptionalField(key: "goal_weight_kg")
+    var goalWeightKg: Int?
+
     @Field(key: "injury_history")
     var injuryHistory: String
 
@@ -87,6 +90,7 @@ final class Client: Model, @unchecked Sendable {
         gender: String = "",
         heightCm: Int? = nil,
         weightKg: Int? = nil,
+        goalWeightKg: Int? = nil,
         injuryHistory: String = "",
         primaryGoal: String = "",
         skillLevel: String = "",
@@ -106,6 +110,7 @@ final class Client: Model, @unchecked Sendable {
         self.gender = gender
         self.heightCm = heightCm
         self.weightKg = weightKg
+        self.goalWeightKg = goalWeightKg
         self.injuryHistory = injuryHistory
         self.primaryGoal = primaryGoal
         self.skillLevel = skillLevel
@@ -130,12 +135,14 @@ struct ClientDTO: Content {
     let gender: String
     let heightCm: Int?
     let weightKg: Int?
+    let goalWeightKg: Int?
     let injuryHistory: String
     let primaryGoal: String
     let skillLevel: String
     let note: String
+    let avatarURL: String?
 
-    init(from client: Client) throws {
+    init(from client: Client, avatarURL: String? = nil) throws {
         guard let id = client.id else {
             throw Abort(.internalServerError, reason: "Client missing id")
         }
@@ -153,10 +160,20 @@ struct ClientDTO: Content {
         self.gender = client.gender
         self.heightCm = client.heightCm
         self.weightKg = client.weightKg
+        self.goalWeightKg = client.goalWeightKg
         self.injuryHistory = client.injuryHistory
         self.primaryGoal = client.primaryGoal
         self.skillLevel = client.skillLevel
         self.note = client.note
+        self.avatarURL = avatarURL
+    }
+
+    static func make(from client: Client, on database: any Database) async throws -> ClientDTO {
+        var avatarURL: String?
+        if let userID = client.$user.id {
+            avatarURL = try await ProfileService.avatarURL(forUserID: userID, on: database)
+        }
+        return try ClientDTO(from: client, avatarURL: avatarURL)
     }
 }
 
@@ -172,6 +189,7 @@ struct CreateClientRequest: Content {
     var gender: String?
     var heightCm: Int?
     var weightKg: Int?
+    var goalWeightKg: Int?
     var injuryHistory: String?
     var primaryGoal: String?
     var skillLevel: String?
@@ -191,6 +209,7 @@ struct UpdateClientRequest: Content {
     var gender: String?
     var heightCm: Int?
     var weightKg: Int?
+    var goalWeightKg: Int?
     var injuryHistory: String?
     var primaryGoal: String?
     var skillLevel: String?

@@ -143,6 +143,7 @@ enum AuthService {
             .filter(\.$appleSubject == appleSubject)
             .first() {
             guard existing.isActive else { throw Abort(.forbidden, reason: "Account is inactive") }
+            try await applyDisplayNameIfNeeded(displayName, to: existing, on: request.db)
             return try await TokenService.issueTokens(for: existing, on: request)
         }
 
@@ -150,16 +151,18 @@ enum AuthService {
            let existingByEmail = try await User.query(on: request.db).filter(\.$email == email).first() {
             existingByEmail.appleSubject = appleSubject
             existingByEmail.isEmailVerified = claims.emailVerified ?? true
+            try await applyDisplayNameIfNeeded(displayName, to: existingByEmail, on: request.db)
             try await existingByEmail.save(on: request.db)
             return try await TokenService.issueTokens(for: existingByEmail, on: request)
         }
 
+        let resolvedName = resolveDisplayName(displayName, email: claims.email)
         let user = User(
             email: claims.email?.lowercased(),
             passwordHash: nil,
             role: role,
             appleSubject: appleSubject,
-            displayName: displayName ?? claims.email ?? "Verra User",
+            displayName: resolvedName,
             isEmailVerified: true
         )
 
@@ -289,6 +292,60 @@ enum AuthService {
             return true
         }
         return Date().timeIntervalSince(createdAt) >= EmailVerificationService.resendCooldown
+    }
+
+    private static func resolveDisplayName(_ provided: String?, email: String?) -> String {
+        if let name = provided?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name
+        }
+        return "Verra User"
+    }
+
+    private static func needsDisplayNameUpgrade(_ current: String) -> Bool {
+        let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "Verra User" { return true }
+        return trimmed.contains("@")
+    }
+
+    private static func applyDisplayNameIfNeeded(
+        _ displayName: String?,
+        to user: User,
+        on database: any Database
+    ) async throws {
+        guard let name = displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+            return
+        }
+        guard needsDisplayNameUpgrade(user.displayName) else { return }
+
+        user.displayName = name
+        try await user.save(on: database)
+
+        if let profile = try await Profile.query(on: database)
+            .filter(\.$user.$id == user.id!)
+            .first() {
+            profile.displayName = name
+            try await profile.save(on: database)
+        }
+
+        switch user.userRole {
+        case .trainer:
+            if let trainer = try await Trainer.query(on: database)
+                .filter(\.$user.$id == user.id!)
+                .first() {
+                trainer.name = name
+                try await trainer.save(on: database)
+            }
+        case .client:
+            if let client = try await Client.query(on: database)
+                .filter(\.$user.$id == user.id!)
+                .first() {
+                client.name = name
+                client.initials = initials(from: name)
+                try await client.save(on: database)
+            }
+        default:
+            break
+        }
     }
 
     private static func createTrainerProfile(for user: User, on database: any Database) async throws {

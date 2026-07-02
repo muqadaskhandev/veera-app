@@ -87,12 +87,14 @@ struct Client: Identifiable, Hashable {
     var gender: String
     var heightCm: Int?
     var weightKg: Int?
+    var goalWeightKg: Int?
     var injuryHistory: String
     var primaryGoal: String
     var skillLevel: String
 
     /// Free-form quick note kept against the client.
     var note: String
+    var avatarURL: String?
 
     init(
         id: UUID = UUID(),
@@ -108,10 +110,12 @@ struct Client: Identifiable, Hashable {
         gender: String = "",
         heightCm: Int? = nil,
         weightKg: Int? = nil,
+        goalWeightKg: Int? = nil,
         injuryHistory: String = "",
         primaryGoal: String = "",
         skillLevel: String = "",
-        note: String = ""
+        note: String = "",
+        avatarURL: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -126,10 +130,12 @@ struct Client: Identifiable, Hashable {
         self.gender = gender
         self.heightCm = heightCm
         self.weightKg = weightKg
+        self.goalWeightKg = goalWeightKg
         self.injuryHistory = injuryHistory
         self.primaryGoal = primaryGoal
         self.skillLevel = skillLevel
         self.note = note
+        self.avatarURL = avatarURL
     }
 
     /// The badge to display, applying override rules:

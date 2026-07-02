@@ -101,14 +101,43 @@ final class ClientStore {
     func setNote(_ note: String, forID id: UUID) {
         guard let index = clients.firstIndex(where: { $0.id == id }) else { return }
         clients[index].note = note
+        Task { @MainActor in
+            guard let token = AuthStore.accessToken else { return }
+            if let dto = try? await VerraAPI.updateClient(id: id, note: note, accessToken: token),
+               let refreshed = clients.firstIndex(where: { $0.id == id }) {
+                clients[refreshed] = ClientLoader.client(from: dto)
+            }
+        }
     }
 
     /// Updates a client's editable biometric fields. `nil` clears a field.
-    func updateBiometrics(age: Int?, heightCm: Int?, weightKg: Int?, for id: UUID) {
+    func updateBiometrics(
+        age: Int?,
+        heightCm: Int?,
+        weightKg: Int?,
+        goalWeightKg: Int? = nil,
+        for id: UUID
+    ) {
         guard let index = clients.firstIndex(where: { $0.id == id }) else { return }
         clients[index].age = age
         clients[index].heightCm = heightCm
         clients[index].weightKg = weightKg
+        if let goalWeightKg { clients[index].goalWeightKg = goalWeightKg }
+        Task { @MainActor in
+            guard let token = AuthStore.accessToken else { return }
+            if let dto = try? await VerraAPI.updateClient(
+                id: id,
+                age: age,
+                heightCm: heightCm,
+                weightKg: weightKg,
+                goalWeightKg: goalWeightKg,
+                accessToken: token
+            ) {
+                if let refreshed = clients.firstIndex(where: { $0.id == id }) {
+                    clients[refreshed] = ClientLoader.client(from: dto)
+                }
+            }
+        }
     }
 
     /// Deducts one session from the first client matching this name, clamped at

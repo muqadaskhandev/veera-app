@@ -18,6 +18,10 @@ enum OnboardingAuthService {
             )
         }
 
-        onComplete(auth.user.displayName)
+        let displayName = await AppleDisplayNameSync.syncIfNeeded(
+            currentName: auth.user.displayName,
+            accessToken: auth.accessToken
+        )
+        onComplete(displayName)
     }
 }

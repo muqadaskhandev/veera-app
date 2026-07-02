@@ -15,10 +15,12 @@ struct ClientDTO: Codable {
     let gender: String
     let heightCm: Int?
     let weightKg: Int?
+    let goalWeightKg: Int?
     let injuryHistory: String
     let primaryGoal: String
     let skillLevel: String
     let note: String
+    let avatarURL: String?
 }
 
 enum ClientLoader {
@@ -37,10 +39,12 @@ enum ClientLoader {
             gender: dto.gender,
             heightCm: dto.heightCm,
             weightKg: dto.weightKg,
+            goalWeightKg: dto.goalWeightKg,
             injuryHistory: dto.injuryHistory,
             primaryGoal: dto.primaryGoal,
             skillLevel: dto.skillLevel,
-            note: dto.note
+            note: dto.note,
+            avatarURL: dto.avatarURL
         )
     }
 }

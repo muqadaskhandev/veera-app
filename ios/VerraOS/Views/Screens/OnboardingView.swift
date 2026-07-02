@@ -266,6 +266,32 @@ struct OnboardingView: View {
                 .transition(.opacity)
                 .zIndex(1)
             }
+
+            if showingLogin && !isInviteScreen {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: 12)
+                    loginBody
+                        .padding(.horizontal, 28)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+                .transition(.opacity)
+                .zIndex(1)
+            }
+
+            if showingForgotPassword && !showingResetPassword && !isInviteScreen {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: 12)
+                    forgotPasswordBody
+                        .padding(.horizontal, 28)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+                .transition(.opacity)
+                .zIndex(1)
+            }
         }
         .onAppear {
             withAnimation(.easeOut(duration: 0.6).delay(0.05)) { appeared = true }
@@ -314,6 +340,15 @@ struct OnboardingView: View {
         !showingLogin && !showingForgotPassword && !showingResetPassword && !showingEmailCodeEntry
     }
 
+    private var isInviteScreen: Bool {
+        if case .invite = current { return true }
+        return false
+    }
+
+    private var showsAuthOverlay: Bool {
+        (showingLogin || showingForgotPassword) && !isInviteScreen
+    }
+
     // MARK: Content
 
     @ViewBuilder
@@ -338,7 +373,9 @@ struct OnboardingView: View {
 
     private var inviteBody: some View {
         Group {
-            if showingForgotPassword {
+            if showingResetPassword {
+                resetPasswordBody
+            } else if showingForgotPassword {
                 forgotPasswordBody
             } else if showingLogin {
                 loginBody
@@ -991,54 +1028,54 @@ struct OnboardingView: View {
 
     @ViewBuilder
     private var bottomBar: some View {
-        switch current {
-        case .register:
+        if showsAuthOverlay {
             HStack {
-                if !isFirst || showingEmailCodeEntry { backButton }
+                backButton
                 Spacer()
             }
-        case .hello:
-            controlRow(label: "I'M READY")
-        case .invite:
-            if showingEmailCodeEntry {
-                HStack {
-                    backButton
-                    Spacer()
-                }
-            } else if showingLogin || showingForgotPassword || showingResetPassword {
-                HStack {
-                    backButton
-                    Spacer()
-                }
-            } else {
-                VStack(spacing: 14) {
-                    inviteControlRow(label: "Continue")
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            showingLogin = true
-                            appeared = false
-                        }
-                        withAnimation(.easeOut(duration: 0.5).delay(0.05)) { appeared = true }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("Already have an account?")
-                                .foregroundStyle(.white.opacity(0.55))
-                            Text("Log in")
-                                .foregroundStyle(Theme.Color.accent)
-                                .fontWeight(.bold)
-                        }
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .frame(maxWidth: .infinity)
+        } else {
+            switch current {
+            case .register:
+                if showingEmailCodeEntry {
+                    HStack {
+                        backButton
+                        Spacer()
                     }
-                    .buttonStyle(.plain)
+                } else {
+                    VStack(spacing: 14) {
+                        existingAccountLoginLink
+                        HStack {
+                            if !isFirst { backButton }
+                            Spacer()
+                        }
+                    }
                 }
+            case .hello:
+                controlRowWithLogin(label: "I'M READY")
+            case .invite:
+                if showingEmailCodeEntry {
+                    HStack {
+                        backButton
+                        Spacer()
+                    }
+                } else if showingLogin || showingForgotPassword || showingResetPassword {
+                    HStack {
+                        backButton
+                        Spacer()
+                    }
+                } else {
+                    VStack(spacing: 14) {
+                        inviteControlRow(label: "Continue")
+                        existingAccountLoginLink
+                    }
+                }
+            case .preview:
+                controlRowWithLogin(label: "Next")
+            case .question:
+                controlRowWithLogin(label: "Next")
+            case .notifications:
+                controlRowWithLogin(label: "Next")
             }
-        case .preview:
-            controlRow(label: "Next")
-        case .question:
-            controlRow(label: "Next")
-        case .notifications:
-            controlRow(label: "Next")
         }
     }
 
@@ -1049,6 +1086,38 @@ struct OnboardingView: View {
         default:
             return true
         }
+    }
+
+    private func controlRowWithLogin(label: String) -> some View {
+        VStack(spacing: 14) {
+            controlRow(label: label)
+            existingAccountLoginLink
+        }
+    }
+
+    private var existingAccountLoginLink: some View {
+        Button(action: openLogin) {
+            HStack(spacing: 6) {
+                Text("Already have an account?")
+                    .foregroundStyle(.white.opacity(0.55))
+                Text("Log in")
+                    .foregroundStyle(Theme.Color.accent)
+                    .fontWeight(.bold)
+            }
+            .font(.system(size: 15, weight: .semibold, design: .rounded))
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func openLogin() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            showingForgotPassword = false
+            showingLogin = true
+            showingLoginEmailFields = false
+            appeared = false
+        }
+        withAnimation(.easeOut(duration: 0.5).delay(0.05)) { appeared = true }
     }
 
     private func controlRow(label: String) -> some View {
@@ -1152,11 +1221,16 @@ struct OnboardingView: View {
             }
             return
         }
-        if case .invite = current, showingResetPassword {
+        if showingResetPassword {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 showingResetPassword = false
                 clearResetPasswordFields()
-                showingForgotPassword = true
+                if forgotPasswordMessage != nil {
+                    showingForgotPassword = true
+                } else {
+                    showingLogin = true
+                    showingLoginEmailFields = true
+                }
             }
             return
         }
@@ -1169,7 +1243,25 @@ struct OnboardingView: View {
             }
             return
         }
+        if showingForgotPassword {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showingForgotPassword = false
+                forgotPasswordMessage = nil
+                forgotResendCooldownRemaining = 0
+                showingLogin = true
+            }
+            return
+        }
         if case .invite = current, showingLogin {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showingLogin = false
+                showingLoginEmailFields = false
+                loginEmail = ""
+                loginPassword = ""
+            }
+            return
+        }
+        if showingLogin {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 showingLogin = false
                 showingLoginEmailFields = false
@@ -1233,7 +1325,12 @@ struct OnboardingView: View {
         resetCode = ""
         resetPassword = ""
         resetPasswordConfirm = ""
+        if forgotPasswordEmail.trimmingCharacters(in: .whitespaces).isEmpty {
+            forgotPasswordEmail = loginEmail
+        }
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            showingLogin = false
+            showingForgotPassword = false
             showingResetPassword = true
         }
     }
@@ -1514,7 +1611,7 @@ struct OnboardingView: View {
         do {
             let email = loginEmail.trimmingCharacters(in: .whitespaces).lowercased()
             let auth = try await VerraAPI.login(email: email, password: loginPassword)
-            try finishLogin(auth: auth)
+            try await finishLogin(auth: auth)
         } catch {
             let message = error.localizedDescription
             if message.localizedCaseInsensitiveContains("verify your email") {
@@ -1578,7 +1675,10 @@ struct OnboardingView: View {
 
         do {
             let fallbackName = registerName.trimmingCharacters(in: .whitespaces)
-            let displayName = apple.displayName ?? (fallbackName.isEmpty ? nil : fallbackName)
+            let displayName = AppleDisplayNameSync.resolvedForRequest(
+                from: apple,
+                fallbackRegisterName: fallbackName
+            )
 
             if !isLogin {
                 do {
@@ -1592,12 +1692,12 @@ struct OnboardingView: View {
             let auth = try await VerraAPI.signInWithApple(
                 identityToken: apple.identityToken,
                 role: role,
-                displayName: isLogin ? nil : displayName,
+                displayName: displayName,
                 inviteCode: isLogin ? nil : validatedInviteCode
             )
 
             if isLogin {
-                try finishLogin(auth: auth)
+                try await finishLogin(auth: auth)
             } else {
                 try await OnboardingAuthService.complete(
                     role: role,
@@ -1612,7 +1712,7 @@ struct OnboardingView: View {
     }
 
     @MainActor
-    private func finishLogin(auth: AuthTokenResponse) throws {
+    private func finishLogin(auth: AuthTokenResponse) async throws {
         let expectedRole = role == .trainer ? "trainer" : "client"
         guard auth.user.role == expectedRole else {
             AuthStore.clear()
@@ -1624,7 +1724,11 @@ struct OnboardingView: View {
             )
         }
         AuthStore.save(accessToken: auth.accessToken, refreshToken: auth.refreshToken)
-        onFinish(auth.user.displayName, "")
+        let displayName = await AppleDisplayNameSync.syncIfNeeded(
+            currentName: auth.user.displayName,
+            accessToken: auth.accessToken
+        )
+        onFinish(displayName, "")
     }
 
     private func finish() {

@@ -70,6 +70,7 @@ struct ChatThreadView: View {
         .onDisappear {
             if voiceRecorder.isRecording { voiceRecorder.cancel() }
             ChatVoicePlayer.shared.stop()
+            store.clearActiveConversation()
             if !coachMode { app.isChatThreadOpen = false }
         }
         .fullScreenCover(isPresented: $showingCamera) {
@@ -112,14 +113,11 @@ struct ChatThreadView: View {
                 .buttonStyle(.plain)
             }
 
-            Circle()
-                .fill(Theme.Color.ink)
-                .frame(width: 40, height: 40)
-                .overlay(
-                    Text(coachMode ? coachName.initialsValue : conversation.initials)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Color.accent)
-                )
+            ChatParticipantAvatar(
+                initials: coachMode ? coachName.initialsValue : conversation.initials,
+                avatarURL: conversation.otherParticipantAvatarURL,
+                size: 40
+            )
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(coachMode ? coachName : conversation.clientName)
@@ -514,19 +512,27 @@ private struct MessageBubble: View {
     @ViewBuilder private var bubble: some View {
         switch message.kind {
         case .text(let body):
-            Text(body)
-                .font(.system(size: 15.5, weight: .medium))
-                .foregroundStyle(message.isOutgoing ? Theme.Color.accentInk : Theme.Color.ink)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(bubbleBackground, in: RoundedRectangle(cornerRadius: 20))
-                .overlay(outgoingStroke)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(body)
+                    .font(.system(size: 15.5, weight: .medium))
+                    .foregroundStyle(message.isOutgoing ? Theme.Color.accentInk : Theme.Color.ink)
+                    .frame(maxWidth: .infinity, alignment: message.isOutgoing ? .trailing : .leading)
+                if message.isOutgoing {
+                    MessageDeliveryIndicator(status: message.deliveryStatus, onAccentBackground: true)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(bubbleBackground, in: RoundedRectangle(cornerRadius: 20))
+            .overlay(outgoingStroke)
         case .photo:
             if let path = message.attachmentURL {
                 ChatAttachmentImage(path: path)
                     .frame(width: 220, height: 220)
+                    .overlay(alignment: .bottomTrailing) { outgoingDeliveryBadge }
             } else {
                 mediaTile(icon: "photo.fill", label: "Photo", aspect: 1.1)
+                    .overlay(alignment: .bottomTrailing) { outgoingDeliveryBadge }
             }
         case .video:
             if let path = message.attachmentURL {
@@ -546,6 +552,15 @@ private struct MessageBubble: View {
 
     private var bubbleBackground: Color {
         message.isOutgoing ? Theme.Color.accent : Theme.Color.surface
+    }
+
+    @ViewBuilder private var outgoingDeliveryBadge: some View {
+        if message.isOutgoing {
+            MessageDeliveryIndicator(status: message.deliveryStatus, onAccentBackground: message.isOutgoing)
+                .padding(8)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(8)
+        }
     }
 
     @ViewBuilder private var outgoingStroke: some View {
@@ -595,6 +610,7 @@ private struct MessageBubble: View {
                         .foregroundStyle(Theme.Color.accent)
                 }
             }
+            .overlay(alignment: .bottomTrailing) { outgoingDeliveryBadge }
         }
         .buttonStyle(.plain)
     }
@@ -651,6 +667,10 @@ private struct VoiceNoteBubble: View {
                 Text(String(format: "0:%02d", seconds))
                     .font(.system(size: 12.5, weight: .bold, design: .monospaced))
                     .foregroundStyle(isOutgoing ? Theme.Color.accentInk.opacity(0.8) : Theme.Color.inkMuted)
+
+                if isOutgoing {
+                    MessageDeliveryIndicator(status: message.deliveryStatus, onAccentBackground: message.isOutgoing)
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)

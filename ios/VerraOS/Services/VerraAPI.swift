@@ -533,6 +533,45 @@ enum VerraAPI {
         )
     }
 
+    static func markConversationDelivered(conversationID: UUID, accessToken: String) async throws -> [MessageDTO] {
+        try await APIClient.shared.request(
+            "/api/conversations/\(conversationID.uuidString)/delivered",
+            method: "PATCH",
+            token: accessToken
+        )
+    }
+
+    struct UpdateClientBody: Encodable {
+        let age: Int?
+        let heightCm: Int?
+        let weightKg: Int?
+        let goalWeightKg: Int?
+        let note: String?
+    }
+
+    static func updateClient(
+        id: UUID,
+        age: Int? = nil,
+        heightCm: Int? = nil,
+        weightKg: Int? = nil,
+        goalWeightKg: Int? = nil,
+        note: String? = nil,
+        accessToken: String
+    ) async throws -> ClientDTO {
+        try await APIClient.shared.request(
+            "/api/clients/\(id.uuidString)",
+            method: "PATCH",
+            body: UpdateClientBody(
+                age: age,
+                heightCm: heightCm,
+                weightKg: weightKg,
+                goalWeightKg: goalWeightKg,
+                note: note
+            ),
+            token: accessToken
+        )
+    }
+
     static func setMessageReaction(
         messageID: UUID,
         reaction: Reaction?,

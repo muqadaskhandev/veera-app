@@ -36,6 +36,25 @@ final class ClientAccountStore {
 
     @MainActor
     func save(displayName: String, avatarUpload: Data?) async throws {
+        try await save(
+            displayName: displayName,
+            avatarUpload: avatarUpload,
+            age: nil,
+            heightCm: nil,
+            weightKg: nil,
+            goalWeightKg: nil
+        )
+    }
+
+    @MainActor
+    func save(
+        displayName: String,
+        avatarUpload: Data?,
+        age: Int?,
+        heightCm: Int?,
+        weightKg: Int?,
+        goalWeightKg: Int?
+    ) async throws {
         guard let token = AuthStore.accessToken else {
             throw APIError.server("Not signed in")
         }
@@ -57,7 +76,14 @@ final class ClientAccountStore {
 
         let response = try await VerraAPI.updateProfile(
             accessToken: token,
-            body: UpdateProfileBody(displayName: displayName, name: displayName)
+            body: UpdateProfileBody(
+                displayName: displayName,
+                name: displayName,
+                age: age,
+                heightCm: heightCm,
+                weightKg: weightKg,
+                goalWeightKg: goalWeightKg
+            )
         )
         await ProfileLoader.applyClientProfile(response, to: self)
     }

@@ -10,9 +10,11 @@
 import SwiftUI
 
 struct ClientTrainerProfileView: View {
-    let profile: TrainerProfile
+    @Bindable var account: ClientAccountStore
 
     @Environment(\.dismiss) private var dismiss
+
+    private var profile: TrainerProfile { account.coachProfile }
 
     private var orderedSpecialties: [Specialty] {
         Specialty.allCases.filter { profile.specialties.contains($0) }
@@ -23,8 +25,8 @@ struct ClientTrainerProfileView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: Theme.Spacing.lg) {
                     hero
-                    if !profile.bio.isEmpty { bioCard }
-                    if !orderedSpecialties.isEmpty { specialtyCard }
+                    aboutCard
+                    specialtyCard
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.md)
@@ -40,6 +42,9 @@ struct ClientTrainerProfileView: View {
                         .foregroundStyle(Theme.Color.ink)
                 }
             }
+            .task {
+                await account.refreshFromServer()
+            }
         }
     }
 
@@ -47,10 +52,10 @@ struct ClientTrainerProfileView: View {
         VStack(spacing: 12) {
             avatar
             VStack(spacing: 5) {
-                Text(profile.name)
+                Text(profile.name.isEmpty ? "Your Trainer" : profile.name)
                     .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(Theme.Color.ink)
-                Text(profile.title)
+                Text(profile.title.isEmpty ? "Strength Coach" : profile.title)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.Color.accentInk)
                     .padding(.horizontal, 12)
@@ -84,11 +89,11 @@ struct ClientTrainerProfileView: View {
         .cardShadow(0.8)
     }
 
-    private var bioCard: some View {
+    private var aboutCard: some View {
         SectionCard(title: "About", icon: "person.text.rectangle") {
-            Text(profile.bio)
+            Text(profile.bio.isEmpty ? "Your coach hasn't added a bio yet." : profile.bio)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.Color.ink)
+                .foregroundStyle(profile.bio.isEmpty ? Theme.Color.inkMuted : Theme.Color.ink)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -96,14 +101,21 @@ struct ClientTrainerProfileView: View {
 
     private var specialtyCard: some View {
         SectionCard(title: "Specialties", icon: "checkmark.seal.fill") {
-            FlowChips(items: orderedSpecialties) { specialty in
-                Text(specialty.rawValue)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.Color.ink)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(Theme.Color.surfaceMuted, in: Capsule())
-                    .overlay(Capsule().stroke(Theme.Color.hairline, lineWidth: 1))
+            if orderedSpecialties.isEmpty {
+                Text("General strength and coaching")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Theme.Color.inkMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                FlowChips(items: orderedSpecialties) { specialty in
+                    Text(specialty.rawValue)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.Color.ink)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(Theme.Color.surfaceMuted, in: Capsule())
+                        .overlay(Capsule().stroke(Theme.Color.hairline, lineWidth: 1))
+                }
             }
         }
     }

@@ -149,10 +149,11 @@ struct ClientRootView: View {
         .environment(healthData)
         .environment(account)
         .sheet(isPresented: $showingTrainerProfile) {
-            ClientTrainerProfileView(profile: account.coachProfile)
+            ClientTrainerProfileView(account: account)
         }
         .sheet(isPresented: $showingEditDetails) {
             ClientEditDetailsSheet(account: account)
+                .environment(trainer)
         }
         .onChange(of: showingEditDetails) { _, isShowing in
             if !isShowing {
@@ -218,6 +219,13 @@ struct ClientRootView: View {
         clients.clients = [loaded]
         schedule.clients = [loaded]
         trainer.profile = account.coachProfile
+        if let start = loaded.weightKg.map(Double.init) {
+            profile.setWeightTargets(
+                start: start,
+                goal: loaded.goalWeightKg.map(Double.init),
+                for: loaded
+            )
+        }
         profile.setVisibleModules(
             [.workout, .wearables, .weight, .nutrition, .photos, .financials],
             for: loaded.id
@@ -241,7 +249,8 @@ struct ClientRootView: View {
                     ClientDashboardView(
                         clientID: client.id,
                         onViewTrainer: { showingTrainerProfile = true },
-                        onConnectTrainer: { showingRedeemInvite = true }
+                        onConnectTrainer: { showingRedeemInvite = true },
+                        onEditProfile: { showingEditDetails = true }
                     )
                 case .schedule:
                     ClientScheduleView(clientName: client.name)
@@ -260,7 +269,7 @@ struct ClientRootView: View {
             .transition(.opacity)
 
             if tab != .messages {
-                ClientTabBar(selected: tab) { newTab in
+                ClientTabBar(selected: tab, messagesUnreadCount: messages.unreadCount) { newTab in
                     guard newTab != tab else { return }
                     withAnimation(.easeInOut(duration: 0.2)) { tab = newTab }
                 }
@@ -364,12 +373,17 @@ private struct ClientTopBar: View {
 
 private struct ClientTabBar: View {
     let selected: ClientTab
+    var messagesUnreadCount: Int = 0
     let onSelect: (ClientTab) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
             ForEach(ClientTab.barTabs) { tab in
-                ClientTabItem(tab: tab, isActive: tab == selected) { onSelect(tab) }
+                ClientTabItem(
+                    tab: tab,
+                    isActive: tab == selected,
+                    badgeCount: tab == .messages ? messagesUnreadCount : 0
+                ) { onSelect(tab) }
             }
         }
         .padding(.horizontal, Theme.Spacing.sm)
@@ -390,6 +404,7 @@ private struct ClientTabBar: View {
 private struct ClientTabItem: View {
     let tab: ClientTab
     let isActive: Bool
+    var badgeCount: Int = 0
     let action: () -> Void
 
     var body: some View {
@@ -405,6 +420,11 @@ private struct ClientTabItem: View {
                     Image(systemName: isActive ? tab.symbolFilled : tab.symbol)
                         .font(.system(size: 19, weight: isActive ? .semibold : .regular))
                         .foregroundStyle(isActive ? Theme.Color.accentInk : Theme.Color.inkFaint)
+
+                    if badgeCount > 0 {
+                        UnreadCountBadge(count: badgeCount, compact: true)
+                            .offset(x: 14, y: -10)
+                    }
                 }
                 .frame(height: 32)
 

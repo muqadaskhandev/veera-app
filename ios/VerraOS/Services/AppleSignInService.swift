@@ -41,7 +41,11 @@ enum AppleSignInService {
         let nameParts = [credential.fullName?.givenName, credential.fullName?.familyName]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
-        let displayName = nameParts.isEmpty ? nil : nameParts.joined(separator: " ")
+        let appleName = nameParts.isEmpty ? nil : nameParts.joined(separator: " ")
+        if let appleName {
+            AppleCredentialStore.displayName = appleName
+        }
+        let displayName = appleName ?? AppleCredentialStore.displayName
 
         AppleCredentialStore.appleUserID = credential.user
 

@@ -63,9 +63,22 @@ struct UpdateProfileRequest: Content {
     var age: Int?
     var heightCm: Int?
     var weightKg: Int?
+    var goalWeightKg: Int?
 }
 
 enum ProfileService {
+    static func avatarURL(forUserID userID: UUID, on database: any Database) async throws -> String? {
+        guard let profile = try await Profile.query(on: database)
+            .filter(\.$user.$id == userID)
+            .first() else {
+            return nil
+        }
+        return AvatarService.publicURL(
+            for: profile.avatarPath,
+            cacheVersion: profile.updatedAt.map { String(Int($0.timeIntervalSince1970)) }
+        )
+    }
+
     static func getOrCreate(for user: User, on database: any Database) async throws -> Profile {
         if let existing = try await Profile.query(on: database)
             .filter(\.$user.$id == user.id!)
@@ -113,11 +126,17 @@ enum ProfileService {
             if let client, let trainer = try await Trainer.find(client.$trainer.id, on: database) {
                 linkedTrainer = try await trainerDTO(for: trainer, on: database)
             }
+            let clientDTO: ClientDTO?
+            if let client {
+                clientDTO = try await ClientDTO.make(from: client, on: database)
+            } else {
+                clientDTO = nil
+            }
             return ProfileResponse(
                 user: ProfileUserDTO(from: user, profile: profile),
                 profile: ProfileDetailsDTO(from: profile),
                 trainer: nil,
-                client: try client.map(ClientDTO.init),
+                client: clientDTO,
                 linkedTrainer: linkedTrainer
             )
         case .admin, .none:
@@ -244,6 +263,7 @@ enum ProfileService {
         if let age = payload.age { client.age = age }
         if let heightCm = payload.heightCm { client.heightCm = heightCm }
         if let weightKg = payload.weightKg { client.weightKg = weightKg }
+        if let goalWeightKg = payload.goalWeightKg { client.goalWeightKg = goalWeightKg }
 
         try await client.save(on: database)
     }

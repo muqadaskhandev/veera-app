@@ -13,6 +13,7 @@ struct ConversationController: RouteCollection {
         chat.get(":conversationID", "messages", use: messages)
         chat.post(":conversationID", "messages", use: send)
         chat.patch(":conversationID", "read", use: markRead)
+        chat.patch(":conversationID", "delivered", use: markDelivered)
         chat.on(.POST, ":conversationID", "attachments", body: .collect(maxSize: "26mb"), use: uploadAttachment)
         chat.get("attachments", ":filename", use: serveAttachment)
 
@@ -121,6 +122,19 @@ struct ConversationController: RouteCollection {
             throw Abort(.badRequest, reason: "Invalid conversation ID")
         }
         return try await ConversationService.markRead(
+            conversationID: conversationID,
+            for: user,
+            on: req.db
+        )
+    }
+
+    @Sendable
+    func markDelivered(req: Request) async throws -> [MessageDTO] {
+        let user = try req.auth.require(User.self)
+        guard let conversationID = req.parameters.get("conversationID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Invalid conversation ID")
+        }
+        return try await ConversationService.markDelivered(
             conversationID: conversationID,
             for: user,
             on: req.db

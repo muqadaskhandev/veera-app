@@ -35,6 +35,13 @@ enum MessageKind: Hashable {
     }
 }
 
+/// Delivery state for outgoing messages (sent → delivered → read).
+enum MessageDeliveryStatus: String, Hashable {
+    case sent
+    case delivered
+    case read
+}
+
 /// A single message in a thread.
 struct Message: Identifiable, Hashable {
     let id: UUID
@@ -44,6 +51,7 @@ struct Message: Identifiable, Hashable {
     var sentAt: Date
     var reaction: Reaction?
     var attachmentURL: String?
+    var deliveryStatus: MessageDeliveryStatus
 
     var minutesAgo: Int {
         max(0, Int(Date().timeIntervalSince(sentAt) / 60))
@@ -55,7 +63,8 @@ struct Message: Identifiable, Hashable {
         isOutgoing: Bool,
         sentAt: Date = .now,
         reaction: Reaction? = nil,
-        attachmentURL: String? = nil
+        attachmentURL: String? = nil,
+        deliveryStatus: MessageDeliveryStatus = .sent
     ) {
         self.id = id
         self.kind = kind
@@ -63,6 +72,7 @@ struct Message: Identifiable, Hashable {
         self.sentAt = sentAt
         self.reaction = reaction
         self.attachmentURL = attachmentURL
+        self.deliveryStatus = deliveryStatus
     }
 }
 
@@ -75,12 +85,14 @@ struct Conversation: Identifiable, Hashable {
     let initials: String
     var messages: [Message]
     var isUnread: Bool
+    var unreadMessageCount: Int
     var lastActiveAt: Date
     var lastMessagePreview: String?
     var lastMessageAt: Date?
     var otherParticipantUserID: UUID?
     var otherParticipantIsOnline: Bool
     var otherParticipantLastSeen: Date?
+    var otherParticipantAvatarURL: String?
 
     /// Presence label for the chat header.
     var presenceLabel: String {
@@ -117,12 +129,14 @@ struct Conversation: Identifiable, Hashable {
         initials: String,
         messages: [Message] = [],
         isUnread: Bool = false,
+        unreadMessageCount: Int = 0,
         lastActiveAt: Date = .now,
         lastMessagePreview: String? = nil,
         lastMessageAt: Date? = nil,
         otherParticipantUserID: UUID? = nil,
         otherParticipantIsOnline: Bool = false,
-        otherParticipantLastSeen: Date? = nil
+        otherParticipantLastSeen: Date? = nil,
+        otherParticipantAvatarURL: String? = nil
     ) {
         self.id = id
         self.clientID = clientID
@@ -130,12 +144,14 @@ struct Conversation: Identifiable, Hashable {
         self.initials = initials
         self.messages = messages
         self.isUnread = isUnread
+        self.unreadMessageCount = unreadMessageCount
         self.lastActiveAt = lastActiveAt
         self.lastMessagePreview = lastMessagePreview
         self.lastMessageAt = lastMessageAt
         self.otherParticipantUserID = otherParticipantUserID
         self.otherParticipantIsOnline = otherParticipantIsOnline
         self.otherParticipantLastSeen = otherParticipantLastSeen
+        self.otherParticipantAvatarURL = otherParticipantAvatarURL
     }
 }
 

@@ -31,13 +31,18 @@ struct ClientController: RouteCollection {
             query = query.filter(\.$trainer.$id == trainer.id!)
         }
 
-        return try await query.all().map(ClientDTO.init)
+        let rows = try await query.all()
+        var result: [ClientDTO] = []
+        for client in rows {
+            result.append(try await ClientDTO.make(from: client, on: req.db))
+        }
+        return result
     }
 
     @Sendable
     func show(req: Request) async throws -> ClientDTO {
         let client = try await requireClient(req)
-        return try ClientDTO(from: client)
+        return try await ClientDTO.make(from: client, on: req.db)
     }
 
     @Sendable
@@ -66,7 +71,7 @@ struct ClientController: RouteCollection {
             note: payload.note ?? ""
         )
         try await client.save(on: req.db)
-        return try ClientDTO(from: client)
+        return try await ClientDTO.make(from: client, on: req.db)
     }
 
     @Sendable
@@ -85,13 +90,14 @@ struct ClientController: RouteCollection {
         if let gender = payload.gender { client.gender = gender }
         if let heightCm = payload.heightCm { client.heightCm = heightCm }
         if let weightKg = payload.weightKg { client.weightKg = weightKg }
+        if let goalWeightKg = payload.goalWeightKg { client.goalWeightKg = goalWeightKg }
         if let injuryHistory = payload.injuryHistory { client.injuryHistory = injuryHistory }
         if let primaryGoal = payload.primaryGoal { client.primaryGoal = primaryGoal }
         if let skillLevel = payload.skillLevel { client.skillLevel = skillLevel }
         if let note = payload.note { client.note = note }
 
         try await client.save(on: req.db)
-        return try ClientDTO(from: client)
+        return try await ClientDTO.make(from: client, on: req.db)
     }
 
     @Sendable

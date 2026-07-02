@@ -198,14 +198,11 @@ private struct ConversationRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Theme.Color.ink)
-                    .frame(width: 50, height: 50)
-                Text(conversation.initials)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.Color.accent)
-            }
+            ChatParticipantAvatar(
+                initials: conversation.initials,
+                avatarURL: conversation.otherParticipantAvatarURL,
+                size: 50
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
@@ -220,14 +217,12 @@ private struct ConversationRow: View {
                 }
                 HStack(spacing: 6) {
                     Text(conversation.lastMessage?.kind.preview ?? conversation.lastMessagePreview ?? "No messages yet")
-                        .font(.system(size: 13.5, weight: conversation.isUnread ? .semibold : .medium))
-                        .foregroundStyle(conversation.isUnread ? Theme.Color.ink : Theme.Color.inkMuted)
+                        .font(.system(size: 13.5, weight: conversation.unreadMessageCount > 0 ? .semibold : .medium))
+                        .foregroundStyle(conversation.unreadMessageCount > 0 ? Theme.Color.ink : Theme.Color.inkMuted)
                         .lineLimit(1)
                     Spacer(minLength: 4)
-                    if conversation.isUnread {
-                        Circle()
-                            .fill(Theme.Color.accent)
-                            .frame(width: 9, height: 9)
+                    if conversation.unreadMessageCount > 0 {
+                        UnreadCountBadge(count: conversation.unreadMessageCount)
                     }
                 }
             }

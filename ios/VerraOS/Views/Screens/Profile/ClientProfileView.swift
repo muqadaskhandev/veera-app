@@ -100,21 +100,13 @@ struct ClientProfileView: View {
 
     private func identityHeader(_ client: Client) -> some View {
         VStack(spacing: 12) {
-            Circle()
-                .fill(Theme.Color.ink)
-                .frame(width: 92, height: 92)
-                .overlay(
-                    Text(client.initials)
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Color.accent)
-                )
+            ClientAvatarView(client: client, size: 92)
                 .overlay(alignment: .bottomTrailing) {
                     Circle()
                         .fill(client.effectiveStatus.tint)
                         .frame(width: 22, height: 22)
                         .overlay(Circle().stroke(Theme.Color.surface, lineWidth: 3))
                 }
-                .cardShadow(0.8)
 
             VStack(spacing: 6) {
                 HStack(spacing: 8) {
@@ -153,11 +145,12 @@ struct ClientProfileView: View {
 
     private func biometrics(_ client: Client) -> some View {
         let start = client.weightKg.map { "\($0) kg" } ?? "—"
-        let goalValue = profile.weightTargets(for: client).goal
-        let goal = goalValue.map { "\(Int($0)) kg" } ?? "—"
+        let goal = client.goalWeightKg.map { "\($0) kg" }
+            ?? profile.weightTargets(for: client).goal.map { "\(Int($0)) kg" }
+            ?? "—"
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("DETAILS")
+                Text("CLIENT DETAILS")
                     .font(.system(size: 11, weight: .bold))
                     .tracking(1.1)
                     .foregroundStyle(Theme.Color.inkFaint)
@@ -480,13 +473,18 @@ private struct EditBiometricsSheet: View {
             heightInches = "\(totalInches % 12)"
         }
         startWeight = client.weightKg.map { "\($0)" } ?? ""
-        let goal = profile.weightTargets(for: client).goal
-        goalWeight = goal.map { "\(Int($0))" } ?? ""
+        if let goalKg = client.goalWeightKg {
+            goalWeight = "\(goalKg)"
+        } else {
+            let goal = profile.weightTargets(for: client).goal
+            goalWeight = goal.map { "\(Int($0))" } ?? ""
+        }
     }
 
     private func save() {
         guard let client else { return }
         let newWeight = Int(startWeight.trimmingCharacters(in: .whitespaces))
+        let newGoal = Int(goalWeight.trimmingCharacters(in: .whitespaces))
         let feet = Int(heightFeet.trimmingCharacters(in: .whitespaces))
         let inches = Int(heightInches.trimmingCharacters(in: .whitespaces))
         let newHeight: Int? = (feet != nil || inches != nil)
@@ -496,11 +494,16 @@ private struct EditBiometricsSheet: View {
             age: Int(age.trimmingCharacters(in: .whitespaces)),
             heightCm: newHeight,
             weightKg: newWeight,
+            goalWeightKg: newGoal,
             for: clientID
         )
-        let goal = Double(goalWeight.trimmingCharacters(in: .whitespaces))
-        let existingStart = profile.weightTargets(for: client).start
-        profile.setWeightTargets(start: existingStart, goal: goal, for: client)
+        if let start = newWeight.map(Double.init) {
+            profile.setWeightTargets(
+                start: start,
+                goal: newGoal.map(Double.init),
+                for: client
+            )
+        }
         onSaved(ToastData(message: "Details updated", icon: "checkmark.circle.fill"))
         dismiss()
     }

@@ -9,12 +9,17 @@ import SwiftUI
 /// Active: filled/bold icon + dark colored label. Inactive: outlined icon + light grey.
 struct BottomTabBar: View {
     let selected: NavTab
+    var messagesUnreadCount: Int = 0
     let onSelect: (NavTab) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
             ForEach(NavTab.allCases) { tab in
-                TabItem(tab: tab, isActive: tab == selected) {
+                TabItem(
+                    tab: tab,
+                    isActive: tab == selected,
+                    badgeCount: tab == .messages ? messagesUnreadCount : 0
+                ) {
                     onSelect(tab)
                 }
             }
@@ -39,6 +44,7 @@ struct BottomTabBar: View {
 private struct TabItem: View {
     let tab: NavTab
     let isActive: Bool
+    var badgeCount: Int = 0
     let action: () -> Void
 
     var body: some View {
@@ -54,6 +60,11 @@ private struct TabItem: View {
                     Image(systemName: isActive ? tab.symbolFilled : tab.symbol)
                         .font(.system(size: 19, weight: isActive ? .semibold : .regular))
                         .foregroundStyle(isActive ? Theme.Color.accentInk : Theme.Color.inkFaint)
+
+                    if badgeCount > 0 {
+                        UnreadCountBadge(count: badgeCount, compact: true)
+                            .offset(x: 14, y: -10)
+                    }
                 }
                 .frame(height: 32)
 

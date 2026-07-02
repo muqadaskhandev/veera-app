@@ -13,6 +13,7 @@ struct ConversationDTO: Codable {
     let otherParticipantUserID: UUID?
     let otherParticipantIsOnline: Bool
     let otherParticipantLastSeen: Date?
+    let otherParticipantAvatarURL: String?
 }
 
 struct MessageDTO: Codable {
@@ -63,7 +64,11 @@ struct AttachmentUploadResponse: Codable {
 }
 
 enum MessageLoader {
-    static func conversation(from dto: ConversationDTO, messages: [Message] = []) -> Conversation {
+    static func conversation(
+        from dto: ConversationDTO,
+        messages: [Message] = [],
+        unreadMessageCount: Int? = nil
+    ) -> Conversation {
         Conversation(
             id: dto.id,
             clientID: dto.clientID,
@@ -71,12 +76,14 @@ enum MessageLoader {
             initials: dto.initials,
             messages: messages,
             isUnread: dto.isUnread,
+            unreadMessageCount: unreadMessageCount ?? (dto.isUnread ? 1 : 0),
             lastActiveAt: dto.lastActiveAt,
             lastMessagePreview: dto.lastMessagePreview,
             lastMessageAt: dto.lastMessageAt,
             otherParticipantUserID: dto.otherParticipantUserID,
             otherParticipantIsOnline: dto.otherParticipantIsOnline,
-            otherParticipantLastSeen: dto.otherParticipantLastSeen
+            otherParticipantLastSeen: dto.otherParticipantLastSeen,
+            otherParticipantAvatarURL: dto.otherParticipantAvatarURL
         )
     }
 
@@ -87,7 +94,8 @@ enum MessageLoader {
             isOutgoing: dto.isOutgoing,
             sentAt: dto.createdAt ?? .now,
             reaction: dto.reaction.flatMap { Reaction(rawValue: $0) },
-            attachmentURL: dto.attachmentURL
+            attachmentURL: dto.attachmentURL,
+            deliveryStatus: MessageDeliveryStatus(rawValue: dto.status) ?? .sent
         )
     }
 

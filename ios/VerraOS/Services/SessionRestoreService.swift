@@ -12,7 +12,20 @@ enum SessionRestoreService {
 
         if let accessToken = AuthStore.accessToken {
             do {
-                return try await VerraAPI.me(accessToken: accessToken)
+                let user = try await VerraAPI.me(accessToken: accessToken)
+                let displayName = await AppleDisplayNameSync.syncIfNeeded(
+                    currentName: user.displayName,
+                    accessToken: accessToken
+                )
+                if displayName == user.displayName {
+                    return user
+                }
+                return AuthUserDTO(
+                    id: user.id,
+                    email: user.email,
+                    role: user.role,
+                    displayName: displayName
+                )
             } catch {
                 // Access token may have expired; try refresh below.
             }
@@ -26,7 +39,19 @@ enum SessionRestoreService {
         do {
             let auth = try await VerraAPI.refresh(refreshToken: refreshToken)
             AuthStore.save(accessToken: auth.accessToken, refreshToken: auth.refreshToken)
-            return auth.user
+            let displayName = await AppleDisplayNameSync.syncIfNeeded(
+                currentName: auth.user.displayName,
+                accessToken: auth.accessToken
+            )
+            if displayName == auth.user.displayName {
+                return auth.user
+            }
+            return AuthUserDTO(
+                id: auth.user.id,
+                email: auth.user.email,
+                role: auth.user.role,
+                displayName: displayName
+            )
         } catch {
             AuthStore.signOut()
             return nil

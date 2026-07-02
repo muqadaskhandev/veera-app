@@ -81,6 +81,7 @@ struct ConversationDTO: Content {
     let otherParticipantUserID: UUID?
     let otherParticipantIsOnline: Bool
     let otherParticipantLastSeen: Date?
+    let otherParticipantAvatarURL: String?
 
     init(
         id: UUID,
@@ -94,7 +95,8 @@ struct ConversationDTO: Content {
         lastMessageAt: Date?,
         otherParticipantUserID: UUID? = nil,
         otherParticipantIsOnline: Bool = false,
-        otherParticipantLastSeen: Date? = nil
+        otherParticipantLastSeen: Date? = nil,
+        otherParticipantAvatarURL: String? = nil
     ) {
         self.id = id
         self.trainerID = trainerID
@@ -108,6 +110,7 @@ struct ConversationDTO: Content {
         self.otherParticipantUserID = otherParticipantUserID
         self.otherParticipantIsOnline = otherParticipantIsOnline
         self.otherParticipantLastSeen = otherParticipantLastSeen
+        self.otherParticipantAvatarURL = otherParticipantAvatarURL
     }
 
     init(from conversation: Conversation, viewerRole: UserRole) throws {
@@ -143,6 +146,7 @@ struct ConversationDTO: Content {
             return dto
         }
         let presence = await PresenceService.state(for: otherID, on: database)
+        let avatarURL = try await ProfileService.avatarURL(forUserID: otherID, on: database)
         dto = ConversationDTO(
             id: dto.id,
             trainerID: dto.trainerID,
@@ -155,7 +159,8 @@ struct ConversationDTO: Content {
             lastMessageAt: dto.lastMessageAt,
             otherParticipantUserID: otherID,
             otherParticipantIsOnline: presence.isOnline,
-            otherParticipantLastSeen: presence.lastSeen
+            otherParticipantLastSeen: presence.lastSeen,
+            otherParticipantAvatarURL: avatarURL
         )
         return dto
     }

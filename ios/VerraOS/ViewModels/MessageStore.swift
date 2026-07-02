@@ -21,7 +21,7 @@ final class MessageStore {
     }
 
     var unreadCount: Int {
-        conversations.filter(\.isUnread).count
+        conversations.reduce(0) { $0 + $1.unreadMessageCount }
     }
 
     /// Search by client name; sorted most-recent first.
@@ -70,7 +70,12 @@ final class MessageStore {
             var merged: [Conversation] = []
             for dto in dtos {
                 if let existing = conversations.first(where: { $0.id == dto.id }) {
-                    var convo = MessageLoader.conversation(from: dto, messages: existing.messages)
+                    let unreadCount = dto.isUnread ? max(existing.unreadMessageCount, 1) : 0
+                    let convo = MessageLoader.conversation(
+                        from: dto,
+                        messages: existing.messages,
+                        unreadMessageCount: unreadCount
+                    )
                     merged.append(convo)
                 } else {
                     merged.append(MessageLoader.conversation(from: dto))
@@ -81,6 +86,11 @@ final class MessageStore {
         } catch {
             // Keep cached conversations when offline.
         }
+    }
+
+    @MainActor
+    func clearActiveConversation() {
+        activeConversationID = nil
     }
 
     @MainActor
@@ -247,26 +257,43 @@ final class MessageStore {
             guard let dto = event.message else { return }
             append(MessageLoader.message(from: dto), to: dto.conversationID)
             updatePreview(for: dto.conversationID, preview: dto.body, at: dto.createdAt ?? .now)
-            if dto.conversationID != activeConversationID {
-                markUnread(dto.conversationID)
-                ChatPushService.showLocalNotification(
-                    title: conversation(id: dto.conversationID)?.clientName ?? "New message",
-                    body: event.preview ?? dto.body,
-                    conversationID: dto.conversationID
-                )
+            if !dto.isOutgoing {
+                if dto.conversationID == activeConversationID {
+                    Task { await acknowledgeRead(conversationID: dto.conversationID) }
+                } else {
+                    markUnread(dto.conversationID)
+                    Task { await acknowledgeDelivered(conversationID: dto.conversationID) }
+                    ChatPushService.showLocalNotification(
+                        title: conversation(id: dto.conversationID)?.clientName ?? "New message",
+                        body: event.preview ?? dto.body,
+                        conversationID: dto.conversationID
+                    )
+                }
             }
+        case "conversation.read":
+            if let id = event.conversationID {
+                markReadLocal(id)
+                markOutgoingMessagesRead(in: id)
+            }
+        case "message.status":
+            guard let dto = event.message else { return }
+            applyMessageStatus(dto)
         case "message.reaction":
             guard let conversationID = event.conversationID,
-                  let messageID = event.messageID,
-                  let cIndex = conversations.firstIndex(where: { $0.id == conversationID }),
-                  let mIndex = conversations[cIndex].messages.firstIndex(where: { $0.id == messageID }) else { return }
-            conversations[cIndex].messages[mIndex].reaction = event.reaction.flatMap { Reaction(rawValue: $0) }
+                  let messageID = event.messageID else { return }
+            updateMessages(in: conversationID) { messages in
+                guard let index = messages.firstIndex(where: { $0.id == messageID }) else { return }
+                messages[index].reaction = event.reaction.flatMap { Reaction(rawValue: $0) }
+            }
         case "typing.start":
             if let id = event.conversationID { typingConversationIDs.insert(id) }
         case "typing.stop":
             if let id = event.conversationID { typingConversationIDs.remove(id) }
         case "conversation.read":
-            if let id = event.conversationID { markReadLocal(id) }
+            if let id = event.conversationID {
+                markReadLocal(id)
+                markOutgoingMessagesRead(in: id)
+            }
         case "presence.update":
             guard let userID = event.userID else { break }
             applyPresence(
@@ -295,16 +322,41 @@ final class MessageStore {
 
     @MainActor
     private func append(_ message: Message, to conversationID: UUID) {
-        guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
-        if conversations[index].messages.contains(where: { $0.id == message.id }) { return }
-        conversations[index].messages.append(message)
-        conversations[index].lastActiveAt = message.sentAt
+        updateMessages(in: conversationID) { messages in
+            guard !messages.contains(where: { $0.id == message.id }) else { return }
+            messages.append(message)
+        }
+        if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+            conversations[index].lastActiveAt = message.sentAt
+        }
     }
 
     @MainActor
     private func applyMessages(_ messages: [Message], to conversationID: UUID) {
         guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
-        conversations[index].messages = messages.sorted { $0.sentAt < $1.sentAt }
+        let existing = Dictionary(uniqueKeysWithValues: conversations[index].messages.map { ($0.id, $0.deliveryStatus) })
+        var merged = messages.sorted { $0.sentAt < $1.sentAt }
+        for i in merged.indices where merged[i].isOutgoing {
+            if let cached = existing[merged[i].id] {
+                merged[i].deliveryStatus = maxDeliveryStatus(cached, merged[i].deliveryStatus)
+            }
+        }
+        conversations[index].messages = merged
+    }
+
+    @MainActor
+    private func updateMessages(in conversationID: UUID, _ transform: (inout [Message]) -> Void) {
+        guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+        var messages = conversations[index].messages
+        transform(&messages)
+        conversations[index].messages = messages
+    }
+
+    private func maxDeliveryStatus(_ lhs: MessageDeliveryStatus, _ rhs: MessageDeliveryStatus) -> MessageDeliveryStatus {
+        let order: [MessageDeliveryStatus] = [.sent, .delivered, .read]
+        let li = order.firstIndex(of: lhs) ?? 0
+        let ri = order.firstIndex(of: rhs) ?? 0
+        return order[max(li, ri)]
     }
 
     @MainActor
@@ -316,15 +368,54 @@ final class MessageStore {
     }
 
     @MainActor
+    private func markOutgoingMessagesRead(in conversationID: UUID) {
+        updateMessages(in: conversationID) { messages in
+            for index in messages.indices where messages[index].isOutgoing {
+                messages[index].deliveryStatus = .read
+            }
+        }
+    }
+
+    @MainActor
+    private func applyMessageStatus(_ dto: MessageDTO) {
+        updateMessages(in: dto.conversationID) { messages in
+            guard let index = messages.firstIndex(where: { $0.id == dto.id }) else { return }
+            guard messages[index].isOutgoing else { return }
+            messages[index].deliveryStatus =
+                MessageDeliveryStatus(rawValue: dto.status) ?? messages[index].deliveryStatus
+        }
+    }
+
+    @MainActor
+    private func acknowledgeRead(conversationID: UUID) async {
+        guard let token = AuthStore.accessToken else { return }
+        _ = try? await VerraAPI.markConversationRead(conversationID: conversationID, accessToken: token)
+        markReadLocal(conversationID)
+    }
+
+    @MainActor
+    private func acknowledgeDelivered(conversationID: UUID) async {
+        guard let token = AuthStore.accessToken else { return }
+        guard let dtos = try? await VerraAPI.markConversationDelivered(conversationID: conversationID, accessToken: token) else {
+            return
+        }
+        for dto in dtos {
+            applyMessageStatus(dto)
+        }
+    }
+
+    @MainActor
     private func markReadLocal(_ id: UUID) {
         guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
         conversations[index].isUnread = false
+        conversations[index].unreadMessageCount = 0
     }
 
     @MainActor
     private func markUnread(_ id: UUID) {
         guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
         conversations[index].isUnread = true
+        conversations[index].unreadMessageCount += 1
     }
 
     @MainActor
