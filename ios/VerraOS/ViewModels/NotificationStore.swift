@@ -12,8 +12,50 @@ import SwiftUI
 final class NotificationStore {
     var notifications: [AppNotification]
 
-    init(notifications: [AppNotification] = NotificationStore.seed()) {
+    init(notifications: [AppNotification] = []) {
         self.notifications = notifications
+    }
+
+    @MainActor
+    func refreshFromServer() async {
+        guard let token = AuthStore.accessToken else { return }
+        do {
+            let dtos = try await VerraAPI.fetchNotifications(accessToken: token)
+            notifications = dtos.map { dto in
+                AppNotification(
+                    id: dto.id,
+                    category: category(from: dto.category),
+                    title: dto.title,
+                    detail: dto.body,
+                    minutesAgo: minutesAgo(from: dto.createdAt),
+                    isRead: dto.isRead
+                )
+            }
+        } catch {
+            // Keep existing notifications when offline.
+        }
+    }
+
+    @MainActor
+    func markAllReadOnServer() async {
+        markAllRead()
+        guard let token = AuthStore.accessToken else { return }
+        try? await VerraAPI.markAllNotificationsRead(accessToken: token)
+    }
+
+    private func category(from raw: String) -> NotificationCategory {
+        switch raw {
+        case "reminder": return .reminder
+        case "schedule", "cancellation": return .cancellation
+        case "activity": return .lowBalance
+        case "message": return .newMessage
+        default: return .paymentLogged
+        }
+    }
+
+    private func minutesAgo(from date: Date?) -> Int {
+        guard let date else { return 0 }
+        return max(0, Int(Date().timeIntervalSince(date) / 60))
     }
 
     var unreadCount: Int {

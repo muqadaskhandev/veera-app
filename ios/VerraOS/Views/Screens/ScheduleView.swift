@@ -17,7 +17,8 @@ enum ScheduleMode: String, CaseIterable, Identifiable {
 struct ScheduleView: View {
     @Environment(ScheduleStore.self) private var store
     @Environment(ClientStore.self) private var clientStore
-    @State private var selectedDay: Int = 17
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var selectedDate = Date()
     @State private var mode: ScheduleMode = .day
 
     @State private var detailSession: Session?
@@ -27,19 +28,16 @@ struct ScheduleView: View {
     @State private var pendingEdit: Session?
     @State private var toast: ToastData?
 
-    /// Mon–Sun for the visible week (June 15–21, 2026).
-    private let week: [(day: String, date: Int)] = [
-        ("Mon", 15), ("Tue", 16), ("Wed", 17), ("Thu", 18), ("Fri", 19), ("Sat", 20), ("Sun", 21)
-    ]
+    private var week: [Date] { ScheduleCalendar.week(containing: selectedDate) }
 
-    private var daySessions: [Session] { store.timelineItems(on: selectedDay) }
+    private var daySessions: [Session] { store.timelineItems(on: selectedDate) }
 
     private func isImportedBusyBlock(_ session: Session) -> Bool {
-        session.notes == "Imported from Apple Calendar"
+        session.notes == CalendarSyncService.importedMarker
     }
 
     private var weeklyVolume: Int {
-        store.sessions.filter { (15...21).contains($0.dayOfMonth) }.count
+        store.sessionsInWeek(containing: selectedDate).count
     }
 
     /// Live remaining sessions for the selected day: scheduled, not skipped,
@@ -60,8 +58,8 @@ struct ScheduleView: View {
             }
             .padding(.horizontal, Theme.Spacing.md)
             .padding(.top, Theme.Spacing.sm)
-            .padding(.bottom, 96)
         }
+        .tabScrollContent()
         .overlay(alignment: .bottomTrailing) { addButton }
         .toast($toast)
         .sheet(item: $detailSession, onDismiss: presentPendingEdit) { session in
@@ -76,12 +74,29 @@ struct ScheduleView: View {
             CalendarSyncSettingsView()
         }
         .onAppear {
+            clientStore.syncRoster(to: store)
             store.reconcilePastSessions(clientStore: clientStore)
-            Task { await store.refreshCalendarData() }
+            selectedDate = Date()
+            store.visibleMonthAnchor = Date()
+            Task {
+                await store.refreshFromServer()
+                await store.refreshCalendarData()
+            }
         }
-        .onChange(of: selectedDay) { _, _ in
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, store.appleLinked {
+                Task { await store.refreshCalendarData() }
+            }
+        }
+        .onChange(of: selectedDate) { _, _ in
             if store.appleLinked, store.importPersonalEvents {
                 Task { await store.refreshCalendarData() }
+            }
+        }
+        .onChange(of: mode) { _, newMode in
+            if newMode == .month {
+                store.visibleMonthAnchor = selectedDate
+                Task { await store.refreshCalendarData(forMonthContaining: selectedDate) }
             }
         }
     }
@@ -245,7 +260,7 @@ struct ScheduleView: View {
         case .day:
             DayTimelineView(
                 week: week,
-                selectedDay: $selectedDay,
+                selectedDate: $selectedDate,
                 sessions: daySessions,
                 onSelectSession: { session in
                     guard !isImportedBusyBlock(session) else { return }
@@ -253,8 +268,13 @@ struct ScheduleView: View {
                 }
             )
         case .month:
-            MonthGridView(sessions: store.sessions, selectedDay: selectedDay) { day in
-                selectedDay = day
+            MonthGridView(
+                sessions: store.sessions + (store.appleLinked && store.importPersonalEvents ? store.busyBlocks.map { $0.asSession() } : []),
+                monthAnchor: store.visibleMonthAnchor,
+                selectedDate: selectedDate
+            ) { date in
+                selectedDate = date
+                store.visibleMonthAnchor = date
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
                     mode = .day
                 }

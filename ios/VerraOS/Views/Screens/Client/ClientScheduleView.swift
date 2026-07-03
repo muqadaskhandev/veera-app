@@ -10,31 +10,38 @@
 import SwiftUI
 
 struct ClientScheduleView: View {
+    let clientID: UUID
     let clientName: String
 
     @Environment(ScheduleStore.self) private var store
     @Environment(ClientStore.self) private var clientStore
 
-    @State private var selectedDay: Int = 17
+    @State private var selectedDate = Date()
+    @State private var monthAnchor = Date()
     @State private var mode: ScheduleMode = .day
     @State private var detailSession: Session?
     @State private var toast: ToastData?
 
-    private let week: [(day: String, date: Int)] = [
-        ("Mon", 15), ("Tue", 16), ("Wed", 17), ("Thu", 18), ("Fri", 19), ("Sat", 20), ("Sun", 21)
-    ]
+    private var week: [Date] { ScheduleCalendar.week(containing: selectedDate) }
 
     /// Only this client's sessions.
     private var mySessions: [Session] {
-        store.sessions.filter { $0.clientName == clientName }
+        store.sessions.filter { session in
+            if let sessionClientID = session.clientID {
+                return sessionClientID == clientID
+            }
+            return session.clientName == clientName
+        }
     }
 
     private var daySessions: [Session] {
-        mySessions.filter { $0.dayOfMonth == selectedDay }.sorted { $0.startMinutes < $1.startMinutes }
+        ScheduleCalendar.sessions(mySessions, on: selectedDate)
     }
 
     private var weeklyCount: Int {
-        mySessions.filter { (15...21).contains($0.dayOfMonth) && !$0.isSkipped }.count
+        ScheduleCalendar.sessionsInWeek(mySessions, containing: selectedDate)
+            .filter { !$0.isSkipped }
+            .count
     }
 
     var body: some View {
@@ -47,13 +54,18 @@ struct ClientScheduleView: View {
             }
             .padding(.horizontal, Theme.Spacing.md)
             .padding(.top, Theme.Spacing.sm)
-            .padding(.bottom, 110)
         }
+        .tabScrollContent()
         .toast($toast)
         .sheet(item: $detailSession) { session in
             detailCard(for: session)
         }
-        .onAppear { store.reconcilePastSessions(clientStore: clientStore) }
+        .onAppear {
+            store.reconcilePastSessions(clientStore: clientStore)
+            selectedDate = Date()
+            monthAnchor = Date()
+            Task { await store.refreshFromServer() }
+        }
     }
 
     private var header: some View {
@@ -107,13 +119,14 @@ struct ClientScheduleView: View {
         case .day:
             DayTimelineView(
                 week: week,
-                selectedDay: $selectedDay,
+                selectedDate: $selectedDate,
                 sessions: daySessions,
                 onSelectSession: { detailSession = $0 }
             )
         case .month:
-            MonthGridView(sessions: mySessions, selectedDay: selectedDay) { day in
-                selectedDay = day
+            MonthGridView(sessions: mySessions, monthAnchor: monthAnchor, selectedDate: selectedDate) { date in
+                selectedDate = date
+                monthAnchor = date
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { mode = .day }
             }
         }

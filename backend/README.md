@@ -185,12 +185,68 @@ curl -X POST http://127.0.0.1:8080/api/onboarding/trainer \
 | GET | `/api/invites` | Trainer/Admin | List invite codes |
 | POST | `/api/invites` | Trainer/Admin | Create invite code |
 
+## Admin dashboard
+
+Open **http://127.0.0.1:8080/admin** in a browser after starting the server. Sign in with an admin account (same credentials as `/api/auth/login`).
+
+### Default dev admin (auto-seeded)
+
+In **development**, a platform admin is created automatically on first migrate if none exists:
+
+| Field | Default |
+|-------|---------|
+| Email | `admin@verra.test` |
+| Password | `password123` |
+| Admin UI | http://127.0.0.1:8080/admin |
+
+Override with `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, and `SEED_ADMIN_NAME` in `.env`. Set `SEED_ADMIN=false` to disable, or `SEED_ADMIN=true` to seed in non-dev environments.
+
+### Create an additional admin manually
+
+Register with the setup secret from `.env`:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@verra.test",
+    "password": "password123",
+    "role": "admin",
+    "displayName": "Platform Admin",
+    "adminSetupSecret": "<ADMIN_SETUP_SECRET from .env>"
+  }'
+```
+
+### Admin UI pages
+
+| Page | Description |
+|------|-------------|
+| Dashboard | User counts, subscriptions, sessions, delivery stats, recent signups |
+| Users | Search/filter accounts, activate or deactivate |
+| Subscriptions | Active and expired App Store subscriptions |
+| Sessions | Recent trainer sessions |
+| Invites | Client invite codes and redemption status |
+| Deliveries | Push/SMS/email outbox with retry for failed items |
+| Exercises | Browse and delete library exercises |
+
 ## Admin APIs
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/api/admin/users` | Admin | List all users |
-| PATCH | `/api/admin/users/:id/status` | Admin | Activate/deactivate user |
+All routes require `Authorization: Bearer <admin-access-token>`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/admin/dashboard` | Platform overview stats |
+| GET | `/api/admin/users` | List users (`?role=`, `?search=`, `?limit=`) |
+| GET | `/api/admin/users/:id` | User detail with subscription |
+| PATCH | `/api/admin/users/:id/status` | Activate/deactivate (`{"isActive": true}`) |
+| GET | `/api/admin/subscriptions` | Subscription list with user info |
+| GET | `/api/admin/sessions` | Recent sessions |
+| GET | `/api/admin/invites` | Invite codes |
+| GET | `/api/admin/exercises` | Exercise library |
+| DELETE | `/api/admin/exercises/:id` | Remove exercise |
+| GET | `/api/admin/notifications/deliveries` | Delivery outbox |
+| GET | `/api/admin/notifications/deliveries/summary` | Delivery counts |
+| POST | `/api/admin/notifications/deliveries/:id/retry` | Retry failed delivery |
 
 ## Data APIs (existing)
 

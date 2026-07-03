@@ -21,6 +21,7 @@ struct ClientDTO: Codable {
     let skillLevel: String
     let note: String
     let avatarURL: String?
+    let visibleModules: [String]?
 }
 
 enum ClientLoader {
@@ -44,7 +45,8 @@ enum ClientLoader {
             primaryGoal: dto.primaryGoal,
             skillLevel: dto.skillLevel,
             note: dto.note,
-            avatarURL: dto.avatarURL
+            avatarURL: dto.avatarURL,
+            visibleModules: dto.visibleModules
         )
     }
 }

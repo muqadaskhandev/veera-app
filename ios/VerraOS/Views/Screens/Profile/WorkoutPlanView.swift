@@ -5,6 +5,8 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import AVKit
+import PhotosUI
 
 private enum EntryMode: String, CaseIterable, Identifiable {
     case builder = "Detailed"
@@ -78,6 +80,10 @@ struct WorkoutPlanView: View {
     @State private var copyWeekTarget = false
     @State private var draggingID: UUID?
     @State private var toast: ToastData?
+    @State private var libraryResults: [LibraryExercise] = []
+    @State private var selectedCategory: ExerciseCategoryFilter = .all
+    @State private var previewExercise: LibraryExercise?
+    @State private var searchTask: Task<Void, Never>?
 
     private static let defaultSectionID = UUID()
 
@@ -110,10 +116,12 @@ struct WorkoutPlanView: View {
         return result
     }
 
-    private var filteredLibrary: [String] {
-        let q = exerciseSearch.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return [] }
-        return ProfileDemo.exerciseLibrary.filter { $0.localizedCaseInsensitiveContains(q) }
+    private var trimmedSearch: String {
+        exerciseSearch.trimmingCharacters(in: .whitespaces)
+    }
+
+    private var visibleLibraryResults: [LibraryExercise] {
+        Array(libraryResults.prefix(12))
     }
 
     var body: some View {
@@ -133,11 +141,33 @@ struct WorkoutPlanView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.sm)
-                .padding(.bottom, 100)
             }
+            .frame(maxHeight: .infinity)
+            .tabScrollContent()
         }
         .background(Theme.Color.background)
         .toast($toast)
+        .task(id: weekIndex) {
+            await profile.refreshModule(.workout, for: client, week: weekIndex)
+        }
+        .onChange(of: exerciseSearch) { _, _ in
+            scheduleLibraryRefresh()
+        }
+        .onChange(of: selectedCategory) { _, _ in
+            scheduleLibraryRefresh()
+        }
+        .onChange(of: searchSectionID) { _, sectionID in
+            if sectionID != nil {
+                scheduleLibraryRefresh()
+            }
+        }
+        .sheet(item: $previewExercise) { exercise in
+            ExerciseDetailSheet(exercise: exercise, isEditable: !isReadOnly) { updated in
+                if let index = libraryResults.firstIndex(where: { $0.id == updated.id }) {
+                    libraryResults[index] = updated
+                }
+            }
+        }
         .sheet(item: $editorTarget) { target in
             ExerciseEditorSheet(
                 exercise: target.exercise,
@@ -436,13 +466,13 @@ struct WorkoutPlanView: View {
     // MARK: Inline search
 
     private var inlineSearchCard: some View {
-        SectionCard(title: "Add Exercise", icon: "magnifyingglass") {
-            VStack(spacing: 10) {
+        SectionCard(title: "Exercise Library", icon: "magnifyingglass") {
+            VStack(spacing: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.Color.inkFaint)
-                    TextField("Type an exercise name", text: $exerciseSearch)
+                    TextField("Search exercises", text: $exerciseSearch)
                         .font(.system(size: 14.5, weight: .medium))
                         .autocorrectionDisabled()
                     Button {
@@ -458,22 +488,43 @@ struct WorkoutPlanView: View {
                 .padding(.horizontal, 13).padding(.vertical, 10)
                 .background(Theme.Color.surfaceMuted, in: Capsule())
 
-                if exerciseSearch.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Text("Start typing to search the library.")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.Color.inkFaint)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 6)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(ExerciseCategoryFilter.allCases) { filter in
+                            ExerciseCategoryChip(
+                                title: filter.label,
+                                isSelected: selectedCategory == filter
+                            ) {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                    selectedCategory = filter
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if visibleLibraryResults.isEmpty {
+                    if trimmedSearch.isEmpty {
+                        Text("Browse the library or search by name.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.Color.inkFaint)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 6)
+                    } else {
+                        searchResultRow(name: trimmedSearch, isCreate: true)
+                    }
                 } else {
                     VStack(spacing: 0) {
-                        ForEach(Array(filteredLibrary.prefix(8).enumerated()), id: \.offset) { index, name in
-                            searchResultRow(name)
-                            if index < min(filteredLibrary.count, 8) - 1 {
+                        ForEach(Array(visibleLibraryResults.enumerated()), id: \.element.id) { index, exercise in
+                            libraryResultRow(exercise)
+                            if index < visibleLibraryResults.count - 1 {
                                 Rectangle().fill(Theme.Color.hairline).frame(height: 1)
                             }
                         }
-                        if filteredLibrary.isEmpty {
-                            searchResultRow(exerciseSearch.trimmingCharacters(in: .whitespaces), isCreate: true)
+                        if !trimmedSearch.isEmpty,
+                           !visibleLibraryResults.contains(where: { $0.name.caseInsensitiveCompare(trimmedSearch) == .orderedSame }) {
+                            Rectangle().fill(Theme.Color.hairline).frame(height: 1)
+                            searchResultRow(name: trimmedSearch, isCreate: true)
                         }
                     }
                 }
@@ -481,16 +532,57 @@ struct WorkoutPlanView: View {
         }
     }
 
-    private func searchResultRow(_ name: String, isCreate: Bool = false) -> some View {
+    private func libraryResultRow(_ exercise: LibraryExercise) -> some View {
+        HStack(spacing: 12) {
+            ExerciseThumbnail(url: exercise.imageURL)
+                .frame(width: 44, height: 44)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(exercise.name)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.Color.ink)
+                    .lineLimit(1)
+                Text(exercise.categoryLabel)
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(Theme.Color.inkMuted)
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                previewExercise = exercise
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.Color.inkFaint)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                addExercise(from: exercise)
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Theme.Color.accent)
+            }
+            .buttonStyle(.plain)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 10)
+    }
+
+    private func searchResultRow(name: String, isCreate: Bool = false) -> some View {
         Button {
-            addExercise(named: name)
+            if isCreate {
+                addCustomExercise(named: name)
+            }
         } label: {
             HStack {
-                Text(isCreate ? "Create “\(name)”" : name)
+                Text(isCreate ? "Create custom “\(name)”" : name)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.Color.ink)
                 Spacer()
-                Image(systemName: "plus.circle.fill")
+                Image(systemName: isCreate ? "square.and.pencil" : "plus.circle.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(Theme.Color.accent)
             }
@@ -498,6 +590,31 @@ struct WorkoutPlanView: View {
             .padding(.vertical, 10)
         }
         .buttonStyle(.plain)
+    }
+
+    private func scheduleLibraryRefresh() {
+        searchTask?.cancel()
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            await refreshLibrary()
+        }
+    }
+
+    @MainActor
+    private func refreshLibrary() async {
+        guard let token = AuthStore.accessToken else {
+            libraryResults = []
+            return
+        }
+        let query = trimmedSearch.isEmpty ? nil : trimmedSearch
+        if let exercises = try? await VerraAPI.fetchExercises(
+            query: query,
+            category: selectedCategory.apiValue,
+            accessToken: token
+        ) {
+            libraryResults = exercises.map(LibraryExercise.init)
+        }
     }
 
     // MARK: Action buttons
@@ -581,7 +698,21 @@ struct WorkoutPlanView: View {
         }
     }
 
-    private func addExercise(named name: String) {
+    private func addExercise(from exercise: LibraryExercise) {
+        insertItem(
+            WorkoutExercise(
+                exerciseID: exercise.id,
+                name: exercise.name,
+                category: exercise.category
+            ),
+            underHeaderID: searchSectionID
+        )
+        exerciseSearch = ""
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { searchSectionID = nil }
+        toast = ToastData(message: "Added \(exercise.name)", icon: "checkmark.circle.fill")
+    }
+
+    private func addCustomExercise(named name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
         insertItem(WorkoutExercise(name: trimmed), underHeaderID: searchSectionID)
@@ -744,11 +875,18 @@ private struct BuilderItemRow: View {
     private var exerciseRow: some View {
         HStack(spacing: 10) {
             if isReadOnly {
-                Text(item.name)
-                    .font(.system(size: 14.5, weight: .semibold))
-                    .foregroundStyle(Theme.Color.ink)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.name)
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(Theme.Color.ink)
+                        .lineLimit(1)
+                    if let category = item.category {
+                        Text(category.replacingOccurrences(of: "_", with: " ").capitalized)
+                            .font(.system(size: 10.5, weight: .bold))
+                            .foregroundStyle(Theme.Color.inkMuted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 6)
                 if !item.detail.isEmpty {
                     Text(item.detail)
@@ -760,12 +898,26 @@ private struct BuilderItemRow: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Theme.Color.inkFaint)
                 Button(action: onEdit) {
-                    Text(item.name)
-                        .font(.system(size: 14.5, weight: .semibold))
-                        .foregroundStyle(Theme.Color.ink)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(item.name)
+                                .font(.system(size: 14.5, weight: .semibold))
+                                .foregroundStyle(Theme.Color.ink)
+                                .lineLimit(1)
+                            if item.isLinkedToLibrary {
+                                Image(systemName: "link")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(Theme.Color.accent)
+                            }
+                        }
+                        if let category = item.category {
+                            Text(category.replacingOccurrences(of: "_", with: " ").capitalized)
+                                .font(.system(size: 10.5, weight: .bold))
+                                .foregroundStyle(Theme.Color.inkMuted)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 Spacer(minLength: 6)
@@ -916,13 +1068,169 @@ private struct ExerciseEditorSheet: View {
         guard !trimmed.isEmpty else { return }
         let result = WorkoutExercise(
             id: exercise?.id ?? UUID(),
+            exerciseID: exercise?.exerciseID,
             name: trimmed,
             sets: isHeader ? nil : Int(setsText),
             reps: isHeader ? nil : Int(repsText),
+            category: exercise?.category,
             kind: isHeader ? .header : .exercise
         )
         onSave(result)
         dismiss()
+    }
+}
+
+// MARK: - Exercise detail sheet
+
+private struct ExerciseDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let exercise: LibraryExercise
+    var isEditable: Bool = false
+    var onUpdated: (LibraryExercise) -> Void = { _ in }
+
+    @State private var detail: LibraryExercise
+    @State private var videoURL: URL?
+    @State private var imagePickerItem: PhotosPickerItem?
+    @State private var videoPickerItem: PhotosPickerItem?
+    @State private var isUploading = false
+    @State private var uploadMessage: String?
+
+    init(exercise: LibraryExercise, isEditable: Bool = false, onUpdated: @escaping (LibraryExercise) -> Void = { _ in }) {
+        self.exercise = exercise
+        self.isEditable = isEditable
+        self.onUpdated = onUpdated
+        _detail = State(initialValue: exercise)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                    ExerciseThumbnail(url: detail.imageURL, cornerRadius: Theme.Radius.md, placeholderIcon: "figure.strengthtraining.traditional")
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
+
+                    Text(detail.categoryLabel)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Theme.Color.accentInk)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Theme.Color.accent.opacity(0.25), in: Capsule())
+
+                    if let description = detail.description, !description.isEmpty {
+                        Text(description)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(Theme.Color.inkMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if isEditable {
+                        VStack(spacing: 10) {
+                            PhotosPicker(selection: $imagePickerItem, matching: .images) {
+                                uploadButton(title: "Upload Image", icon: "photo")
+                            }
+                            PhotosPicker(selection: $videoPickerItem, matching: .videos) {
+                                uploadButton(title: "Upload Demo Video", icon: "video")
+                            }
+                            if let uploadMessage {
+                                Text(uploadMessage)
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundStyle(Theme.Color.inkMuted)
+                            }
+                        }
+                    }
+
+                    if detail.videoURL != nil {
+                        if let videoURL {
+                            VideoPlayer(player: AVPlayer(url: videoURL))
+                                .frame(height: 220)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
+                        } else {
+                            ProgressView("Loading demo video…")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 24)
+                        }
+                    }
+                }
+                .padding(Theme.Spacing.md)
+            }
+            .background(Theme.Color.background)
+            .navigationTitle(detail.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .font(.system(size: 16, weight: .bold))
+                }
+            }
+            .task(id: detail.videoURL) {
+                guard let path = detail.videoURL else {
+                    videoURL = nil
+                    return
+                }
+                videoURL = await ChatAttachmentLoader.localVideoURL(for: path)
+            }
+            .onChange(of: imagePickerItem) { _, item in
+                guard let item else { return }
+                Task { await uploadImage(from: item) }
+            }
+            .onChange(of: videoPickerItem) { _, item in
+                guard let item else { return }
+                Task { await uploadVideo(from: item) }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func uploadButton(title: String, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+            Text(isUploading ? "Uploading…" : title)
+        }
+        .font(.system(size: 14, weight: .bold))
+        .foregroundStyle(Theme.Color.ink)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(Theme.Color.surfaceMuted, in: Capsule())
+    }
+
+    @MainActor
+    private func applyUpdate(_ dto: VerraAPI.ExerciseDTO) {
+        let updated = LibraryExercise(from: dto)
+        detail = updated
+        onUpdated(updated)
+        uploadMessage = "Media updated"
+    }
+
+    private func uploadImage(from item: PhotosPickerItem) async {
+        guard isEditable, let token = AuthStore.accessToken else { return }
+        isUploading = true
+        defer {
+            isUploading = false
+            imagePickerItem = nil
+        }
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let dto = try? await VerraAPI.uploadExerciseImage(exerciseID: detail.id, imageData: data, accessToken: token) else {
+            await MainActor.run { uploadMessage = "Image upload failed" }
+            return
+        }
+        await MainActor.run { applyUpdate(dto) }
+    }
+
+    private func uploadVideo(from item: PhotosPickerItem) async {
+        guard isEditable, let token = AuthStore.accessToken else { return }
+        isUploading = true
+        defer {
+            isUploading = false
+            videoPickerItem = nil
+        }
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let dto = try? await VerraAPI.uploadExerciseVideo(exerciseID: detail.id, videoData: data, accessToken: token) else {
+            await MainActor.run { uploadMessage = "Video upload failed" }
+            return
+        }
+        await MainActor.run { applyUpdate(dto) }
     }
 }
 

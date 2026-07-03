@@ -83,10 +83,26 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         }
         .task {
+            profile.onVisibleModulesPersisted = { id, modules in
+                clients.updateVisibleModules(modules, for: id)
+                clients.syncRoster(to: schedule)
+            }
             await trainer.refreshFromServer()
             await clients.refreshFromServer()
+            clients.syncRoster(to: schedule)
+            profile.applyVisibleModulesFromClients(clients.clients)
+            await schedule.refreshFromServer()
+            await schedule.syncGoogleConnectionStatus()
+            await notifications.refreshFromServer()
+            schedule.startCalendarMonitoring()
+            if schedule.isSynced {
+                await schedule.refreshCalendarData()
+            }
             if let token = AuthStore.accessToken {
                 await messages.start(accessToken: token)
+                if let summary = try? await VerraAPI.fetchFinancialSummary(filter: "month", accessToken: token) {
+                    PlatformLoader.applyFinancialEvents(summary.events, clients: clients.clients, to: profile)
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openChatConversation)) { notification in
@@ -95,6 +111,7 @@ struct ContentView: View {
         }
         .onDisappear {
             messages.stop()
+            schedule.stopCalendarMonitoring()
         }
     }
 
@@ -109,11 +126,11 @@ struct ContentView: View {
                 onMenu: { app.openDrawer() },
                 onBell: {
                     showingNotifications = true
-                    notifications.markAllRead()
+                    Task { await notifications.markAllReadOnServer() }
                 }
             )
 
-            ZStack {
+            Group {
                 switch app.selectedTab {
                 case .schedule: ScheduleView()
                 case .clients: ClientsView()
@@ -123,12 +140,13 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .transition(.opacity)
-
-            if !app.isChatThreadOpen {
-                BottomTabBar(selected: app.selectedTab, messagesUnreadCount: messages.unreadCount) { tab in
-                    app.select(tab)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !app.isChatThreadOpen {
+                    BottomTabBar(selected: app.selectedTab, messagesUnreadCount: messages.unreadCount) { tab in
+                        app.select(tab)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.22), value: app.isChatThreadOpen)

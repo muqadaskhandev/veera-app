@@ -38,8 +38,6 @@ func configure(_ app: Application) async throws {
     app.migrations.add(CreateSession())
     app.migrations.add(CreateConversation())
     app.migrations.add(CreateMessage())
-    app.migrations.add(EnhanceChatMessaging())
-    app.migrations.add(CreatePushDeviceToken())
     app.migrations.add(CreateUser())
     app.migrations.add(AddLastSeenToUser())
     app.migrations.add(CreateAuthSession())
@@ -48,8 +46,10 @@ func configure(_ app: Application) async throws {
     app.migrations.add(AddInvitedEmailToInviteCode())
     app.migrations.add(CreateTrainerOnboarding())
     app.migrations.add(AddUserForeignKeys())
-    app.migrations.add(CreateEmailVerificationCode())
     app.migrations.add(AddGoogleSubjectToUser())
+    app.migrations.add(CreateEmailVerificationCode())
+    app.migrations.add(EnhanceChatMessaging())
+    app.migrations.add(CreatePushDeviceToken())
     app.migrations.add(AddProfileFields())
     app.migrations.add(CreateProfile())
     app.migrations.add(MigrateExistingProfiles())
@@ -58,7 +58,15 @@ func configure(_ app: Application) async throws {
     app.migrations.add(CreateOuraToken())
     app.migrations.add(CreateOuraOAuthState())
     app.migrations.add(AddGoalWeightToClient())
+    app.migrations.add(AddVisibleModulesToClient())
+    app.migrations.add(CreatePlatformFeatures())
+    app.migrations.add(AddExerciseLibraryFields())
+    app.migrations.add(CreateNotificationOutbox())
+    app.migrations.add(CreateGoogleCalendarTables())
     app.migrations.add(SeedDefaultTrainer())
+    app.migrations.add(SeedDefaultAdmin())
+
+    app.lifecycle.use(ReminderPollingService())
 
     try await app.autoMigrate()
 
@@ -76,6 +84,12 @@ func configure(_ app: Application) async throws {
         app.logger.warning("APNs is not configured — background push will not be delivered")
     } else {
         app.logger.warning("APNs is not configured — background push will fail in production")
+    }
+
+    if TwilioService.isConfigured() {
+        app.logger.info("Twilio SMS delivery is enabled")
+    } else if app.environment == .development {
+        app.logger.warning("Twilio is not configured — SMS messages are logged locally in development")
     }
 
     try routes(app)

@@ -137,19 +137,33 @@ enum WorkoutItemKind: String, Hashable {
 
 struct WorkoutExercise: Identifiable, Hashable {
     let id: UUID
+    var exerciseID: UUID?
     var name: String
     var sets: Int?
     var reps: Int?
+    var category: String?
     /// Whether this row is an exercise, a section header, or a rest day.
     var kind: WorkoutItemKind
 
-    init(id: UUID = UUID(), name: String, sets: Int? = nil, reps: Int? = nil, kind: WorkoutItemKind = .exercise) {
+    init(
+        id: UUID = UUID(),
+        exerciseID: UUID? = nil,
+        name: String,
+        sets: Int? = nil,
+        reps: Int? = nil,
+        category: String? = nil,
+        kind: WorkoutItemKind = .exercise
+    ) {
         self.id = id
+        self.exerciseID = exerciseID
         self.name = name
         self.sets = sets
         self.reps = reps
+        self.category = category
         self.kind = kind
     }
+
+    var isLinkedToLibrary: Bool { exerciseID != nil }
 
     var isHeader: Bool { kind == .header }
     var isRestItem: Bool { kind == .rest }
@@ -208,18 +222,22 @@ struct WeightTargets: Hashable {
     var goal: Double?
 }
 
-/// A logged progress photo. No real image in the cloud simulator, so a tint
-/// stands in for the captured photo while keeping the chronological log real.
+/// A logged progress photo. Remote entries load from `imageURL`; local-only
+/// placeholders use `tintHex` until uploaded.
 struct ProgressPhoto: Identifiable, Hashable {
     let id: UUID
     var date: Date
     var tintHex: UInt
+    var imageURL: String?
 
-    init(id: UUID = UUID(), date: Date, tintHex: UInt) {
+    init(id: UUID = UUID(), date: Date, tintHex: UInt = 0x8C887E, imageURL: String? = nil) {
         self.id = id
         self.date = date
         self.tintHex = tintHex
+        self.imageURL = imageURL
     }
+
+    var hasRemoteImage: Bool { imageURL != nil }
 
     var label: String { date.formatted(.dateTime.month(.abbreviated).year()) }
 
@@ -237,7 +255,7 @@ enum ProfileDemo {
         }
     }
 
-    /// Reference list used by the workout builder's exercise search.
+    /// Reference list used only when creating a custom exercise offline.
     static let exerciseLibrary: [String] = [
         "Back Squat", "Front Squat", "Bench Press", "Incline Bench Press", "Deadlift",
         "Romanian Deadlift", "Overhead Press", "Pull-Ups", "Chin-Ups", "Barbell Row",

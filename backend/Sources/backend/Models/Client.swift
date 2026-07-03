@@ -61,6 +61,9 @@ final class Client: Model, @unchecked Sendable {
     @Field(key: "note")
     var note: String
 
+    @OptionalField(key: "visible_modules_json")
+    var visibleModulesJSON: String?
+
     @Timestamp(key: "created_at", on: .create)
     var createdAt: Date?
 
@@ -140,6 +143,7 @@ struct ClientDTO: Content {
     let primaryGoal: String
     let skillLevel: String
     let note: String
+    let visibleModules: [String]?
     let avatarURL: String?
 
     init(from client: Client, avatarURL: String? = nil) throws {
@@ -165,6 +169,7 @@ struct ClientDTO: Content {
         self.primaryGoal = client.primaryGoal
         self.skillLevel = client.skillLevel
         self.note = client.note
+        self.visibleModules = ClientVisibleModules.decode(client.visibleModulesJSON)
         self.avatarURL = avatarURL
     }
 
@@ -196,6 +201,35 @@ struct CreateClientRequest: Content {
     var note: String?
 }
 
+enum ClientVisibleModules {
+    static let allowed: Set<String> = [
+        "wearables", "workout", "nutrition", "weight", "photos", "financials",
+    ]
+
+    static func decode(_ json: String?) -> [String]? {
+        guard let json, let data = json.data(using: .utf8),
+              let values = try? JSONDecoder().decode([String].self, from: data) else {
+            return nil
+        }
+        let filtered = values.filter { allowed.contains($0) }
+        return filtered.isEmpty ? nil : filtered
+    }
+
+    static func encode(_ values: [String]) -> String {
+        let filtered = values.filter { allowed.contains($0) }
+        let data = (try? JSONEncoder().encode(filtered)) ?? Data("[]".utf8)
+        return String(data: data, encoding: .utf8) ?? "[]"
+    }
+
+    static func validated(_ values: [String]) throws -> [String] {
+        let unknown = Set(values).subtracting(allowed)
+        guard unknown.isEmpty else {
+            throw Abort(.badRequest, reason: "Unknown profile module(s): \(unknown.sorted().joined(separator: ", "))")
+        }
+        return values.filter { allowed.contains($0) }
+    }
+}
+
 struct UpdateClientRequest: Content {
     var name: String?
     var initials: String?
@@ -214,4 +248,5 @@ struct UpdateClientRequest: Content {
     var primaryGoal: String?
     var skillLevel: String?
     var note: String?
+    var visibleModules: [String]?
 }

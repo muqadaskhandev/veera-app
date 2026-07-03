@@ -77,8 +77,9 @@ struct ClientProfileView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.sm)
-                .padding(.bottom, 100)
             }
+            .frame(maxHeight: .infinity)
+            .tabScrollContent()
         }
     }
 
@@ -221,12 +222,14 @@ struct ClientProfileView: View {
             ForEach(ProfileModule.allCases) { module in
                 Toggle(isOn: Binding(
                     get: { profile.isVisible(module, for: client.id) },
-                    set: { _ in
+                    set: { newValue in
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                            profile.toggle(module, for: client.id)
+                            profile.setVisible(module, newValue, for: client.id)
                         }
-                        let on = profile.isVisible(module, for: client.id)
-                        toast = ToastData(message: "\(module.title) \(on ? "shown" : "hidden")", icon: on ? "eye.fill" : "eye.slash.fill")
+                        toast = ToastData(
+                            message: "\(module.title) \(newValue ? "shown" : "hidden")",
+                            icon: newValue ? "eye.fill" : "eye.slash.fill"
+                        )
                     }
                 )) {
                     HStack(spacing: 10) {

@@ -123,8 +123,8 @@ struct ClientsView: View {
             }
             .padding(.horizontal, Theme.Spacing.md)
             .padding(.top, Theme.Spacing.sm)
-            .padding(.bottom, 100)
         }
+        .tabScrollContent()
     }
 
     // MARK: Count header
@@ -333,21 +333,18 @@ private struct ClientRow: View {
     }
 
     private var avatar: some View {
-        Circle()
-            .fill(Theme.Color.ink)
-            .frame(width: 46, height: 46)
-            .overlay(
-                Text(client.initials)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.Color.accent)
-            )
-            .overlay(alignment: .bottomTrailing) {
-                Circle()
-                    .fill(status.tint)
-                    .frame(width: 13, height: 13)
-                    .overlay(Circle().stroke(Theme.Color.surface, lineWidth: 2))
-                    .offset(x: 1, y: 1)
-            }
+        ChatParticipantAvatar(
+            initials: client.initials,
+            avatarURL: client.avatarURL,
+            size: 46
+        )
+        .overlay(alignment: .bottomTrailing) {
+            Circle()
+                .fill(status.tint)
+                .frame(width: 13, height: 13)
+                .overlay(Circle().stroke(Theme.Color.surface, lineWidth: 2))
+                .offset(x: 1, y: 1)
+        }
     }
 }
 

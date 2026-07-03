@@ -46,6 +46,7 @@ struct ProfileClientDTO: Codable {
     let skillLevel: String
     let note: String
     let avatarURL: String?
+    let visibleModules: [String]?
 }
 
 struct LinkedTrainerDTO: Codable {
@@ -148,7 +149,8 @@ enum ProfileLoader {
             primaryGoal: dto.primaryGoal,
             skillLevel: dto.skillLevel,
             note: dto.note,
-            avatarURL: dto.avatarURL
+            avatarURL: dto.avatarURL,
+            visibleModules: dto.visibleModules
         )
     }
 

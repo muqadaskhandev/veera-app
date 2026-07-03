@@ -70,6 +70,10 @@ final class User: Model, Content, Authenticatable, @unchecked Sendable {
     var userRole: UserRole? {
         UserRole(rawValue: role)
     }
+
+    var isAdmin: Bool {
+        userRole == .admin
+    }
 }
 
 struct UserDTO: Content {

@@ -10,6 +10,9 @@ import SwiftUI
 /// data is seeded lazily the first time a client's profile is opened.
 @Observable
 final class ProfileStore {
+    /// Called after visible-module toggles are saved to the API.
+    var onVisibleModulesPersisted: ((UUID, [String]) -> Void)?
+
     private var visibleModules: [UUID: Set<ProfileModule>] = [:]
     private var weightStore: [UUID: [WeightEntry]] = [:]
     private var weightTargetStore: [UUID: WeightTargets] = [:]
@@ -21,8 +24,34 @@ final class ProfileStore {
     private var photoStore: [UUID: [ProgressPhoto]] = [:]
     /// How many workout weeks exist per client (always at least 1).
     private var workoutWeekCounts: [UUID: Int] = [:]
+    private var workoutPersistTasks: [String: Task<Void, Never>] = [:]
+    private var nutritionPersistTasks: [UUID: Task<Void, Never>] = [:]
+    private var weightPersistTasks: [UUID: Task<Void, Never>] = [:]
+    private var moduleVisibilityPersistTasks: [UUID: Task<Void, Never>] = [:]
 
     // MARK: Module visibility
+
+    private func defaultModules() -> Set<ProfileModule> {
+        Set(ProfileModule.allCases.filter { $0.defaultOn })
+    }
+
+    private func resolvedModules(from raw: [String]?) -> Set<ProfileModule> {
+        guard let raw, !raw.isEmpty else { return defaultModules() }
+        let set = Set(raw.compactMap(ProfileModule.init(rawValue:)))
+        return set.isEmpty ? defaultModules() : set
+    }
+
+    func applyVisibleModules(_ raw: [String]?, for id: UUID) {
+        visibleModules[id] = resolvedModules(from: raw)
+    }
+
+    func applyVisibleModulesFromClients(_ clients: [Client]) {
+        for client in clients {
+            if visibleModules[client.id] == nil || client.visibleModules != nil {
+                applyVisibleModules(client.visibleModules, for: client.id)
+            }
+        }
+    }
 
     func modules(for id: UUID) -> Set<ProfileModule> {
         if let existing = visibleModules[id] { return existing }
@@ -42,9 +71,18 @@ final class ProfileStore {
     }
 
     func toggle(_ module: ProfileModule, for id: UUID) {
+        setVisible(module, !isVisible(module, for: id), for: id)
+    }
+
+    func setVisible(_ module: ProfileModule, _ visible: Bool, for id: UUID) {
         var set = modules(for: id)
-        if set.contains(module) { set.remove(module) } else { set.insert(module) }
+        if visible {
+            set.insert(module)
+        } else {
+            set.remove(module)
+        }
         visibleModules[id] = set
+        scheduleModuleVisibilityPersist(for: id)
     }
 
     /// Replaces the full visible-module set for a client. Used to seed a richer
@@ -70,6 +108,7 @@ final class ProfileStore {
             entries.append(WeightEntry(daysAgo: 0, kg: rounded))
         }
         weightStore[client.id] = entries
+        scheduleWeightPersist(kg: rounded, for: client)
     }
 
     func weightTargets(for client: Client) -> WeightTargets {
@@ -111,6 +150,7 @@ final class ProfileStore {
         var days = workoutWeek(for: id, week: week)
         transform(&days)
         workoutStore[workoutKey(id, week)] = days
+        scheduleWorkoutPersist(clientID: id, week: week)
     }
 
     /// Copies the exercises of one day onto another day within the same week.
@@ -120,9 +160,17 @@ final class ProfileStore {
         let source = days[fromIndex]
         days[toIndex].focus = source.focus
         days[toIndex].exercises = source.exercises.map {
-            WorkoutExercise(name: $0.name, sets: $0.sets, reps: $0.reps, kind: $0.kind)
+            WorkoutExercise(
+                exerciseID: $0.exerciseID,
+                name: $0.name,
+                sets: $0.sets,
+                reps: $0.reps,
+                category: $0.category,
+                kind: $0.kind
+            )
         }
         workoutStore[workoutKey(id, week)] = days
+        scheduleWorkoutPersist(clientID: id, week: week)
     }
 
     /// Copies an entire week's plan onto another week index, creating the
@@ -135,11 +183,19 @@ final class ProfileStore {
                 label: day.label,
                 focus: day.focus,
                 exercises: day.exercises.map {
-                    WorkoutExercise(name: $0.name, sets: $0.sets, reps: $0.reps, kind: $0.kind)
+                    WorkoutExercise(
+                        exerciseID: $0.exerciseID,
+                        name: $0.name,
+                        sets: $0.sets,
+                        reps: $0.reps,
+                        category: $0.category,
+                        kind: $0.kind
+                    )
                 }
             )
         }
         workoutStore[workoutKey(id, to)] = copied
+        scheduleWorkoutPersist(clientID: id, week: to)
     }
 
     // MARK: Nutrition
@@ -150,6 +206,7 @@ final class ProfileStore {
 
     func setMacros(_ macros: MacroTargets, for id: UUID) {
         macroStore[id] = macros
+        scheduleNutritionPersist(for: id)
     }
 
     func notes(for id: UUID) -> [NutritionNote] {
@@ -160,6 +217,7 @@ final class ProfileStore {
         var notes = notes(for: id)
         notes.insert(NutritionNote(text: text), at: 0)
         notesStore[id] = notes
+        scheduleNutritionPersist(for: id)
     }
 
     func updateNote(_ note: NutritionNote, for id: UUID) {
@@ -167,10 +225,12 @@ final class ProfileStore {
         guard let idx = notes.firstIndex(where: { $0.id == note.id }) else { return }
         notes[idx] = note
         notesStore[id] = notes
+        scheduleNutritionPersist(for: id)
     }
 
     func deleteNote(_ noteID: UUID, for id: UUID) {
         notesStore[id] = notes(for: id).filter { $0.id != noteID }
+        scheduleNutritionPersist(for: id)
     }
 
     // MARK: Supplements
@@ -183,6 +243,7 @@ final class ProfileStore {
         var supps = supplements(for: id)
         supps.append(Supplement(name: name, dosage: dosage))
         supplementStore[id] = supps
+        scheduleNutritionPersist(for: id)
     }
 
     func updateSupplement(_ supplement: Supplement, for id: UUID) {
@@ -190,10 +251,12 @@ final class ProfileStore {
         guard let idx = supps.firstIndex(where: { $0.id == supplement.id }) else { return }
         supps[idx] = supplement
         supplementStore[id] = supps
+        scheduleNutritionPersist(for: id)
     }
 
     func deleteSupplement(_ supplementID: UUID, for id: UUID) {
         supplementStore[id] = supplements(for: id).filter { $0.id != supplementID }
+        scheduleNutritionPersist(for: id)
     }
 
     // MARK: Progress photos
@@ -211,8 +274,36 @@ final class ProfileStore {
         photoStore[id] = photos.sorted { $0.date > $1.date }
     }
 
-    func deletePhoto(_ photoID: UUID, for id: UUID) {
+    func removePhoto(_ photoID: UUID, for id: UUID) {
         photoStore[id] = photos(for: id).filter { $0.id != photoID }
+    }
+
+    func replaceWeightLogs(_ entries: [WeightEntry], for id: UUID) {
+        weightStore[id] = entries
+    }
+
+    func replaceNutrition(
+        macros: MacroTargets,
+        notes: [NutritionNote],
+        supplements: [Supplement],
+        for id: UUID
+    ) {
+        macroStore[id] = macros
+        notesStore[id] = notes
+        supplementStore[id] = supplements
+    }
+
+    func replacePhotos(_ photos: [ProgressPhoto], for id: UUID) {
+        photoStore[id] = photos.sorted { $0.date > $1.date }
+    }
+
+    func applyWeightTargets(from client: Client) {
+        var targets = weightTargetStore[client.id] ?? WeightTargets(start: nil, goal: nil)
+        if targets.start == nil {
+            targets.start = client.weightKg.map(Double.init)
+        }
+        targets.goal = client.goalWeightKg.map(Double.init)
+        weightTargetStore[client.id] = targets
     }
 
     // MARK: Ledger
@@ -233,5 +324,169 @@ final class ProfileStore {
         entries.insert(entry, at: 0)
         entries.sort { $0.date > $1.date }
         ledgerStore[id] = entries
+    }
+
+    func replaceLedger(_ entries: [LedgerEntry], for id: UUID) {
+        ledgerStore[id] = entries.sorted { $0.date > $1.date }
+    }
+
+    func replaceWorkoutWeek(_ days: [WorkoutDay], week: Int, for id: UUID, weekCount: Int) {
+        workoutWeekCounts[id] = max(1, weekCount)
+        workoutStore[workoutKey(id, week)] = days
+    }
+}
+
+// MARK: - Server sync
+
+extension ProfileStore {
+    @MainActor
+    func refreshModule(_ module: ProfileModule, for client: Client, week: Int = 0) async {
+        guard let token = AuthStore.accessToken else { return }
+        switch module {
+        case .workout:
+            if let response = try? await VerraAPI.fetchWorkoutWeek(
+                clientID: client.id,
+                week: week,
+                accessToken: token
+            ) {
+                PlatformLoader.applyWorkoutWeek(response, clientID: client.id, week: week, to: self)
+            }
+        case .weight:
+            applyWeightTargets(from: client)
+            if let logs = try? await VerraAPI.fetchWeightLogs(clientID: client.id, accessToken: token) {
+                PlatformLoader.applyWeightLogs(logs, for: client.id, to: self)
+            }
+        case .nutrition:
+            if let dto = try? await VerraAPI.fetchNutrition(clientID: client.id, accessToken: token) {
+                PlatformLoader.applyNutrition(dto, clientID: client.id, to: self)
+            }
+        case .photos:
+            if let photos = try? await VerraAPI.fetchProgressPhotos(clientID: client.id, accessToken: token) {
+                PlatformLoader.applyPhotos(photos, clientID: client.id, to: self)
+            }
+        default:
+            break
+        }
+    }
+
+    @MainActor
+    func uploadPhoto(data: Data, for clientID: UUID) async -> Bool {
+        guard let token = AuthStore.accessToken else { return false }
+        guard let dto = try? await VerraAPI.uploadProgressPhoto(
+            clientID: clientID,
+            imageData: data,
+            accessToken: token
+        ) else {
+            return false
+        }
+        var photos = photos(for: clientID)
+        photos.insert(ProgressPhoto(id: dto.id, date: dto.capturedAt, imageURL: dto.imageURL), at: 0)
+        photoStore[clientID] = photos.sorted { $0.date > $1.date }
+        return true
+    }
+
+    @MainActor
+    func deletePhoto(_ photoID: UUID, for clientID: UUID) async -> Bool {
+        guard let token = AuthStore.accessToken else { return false }
+        do {
+            try await VerraAPI.deleteProgressPhoto(clientID: clientID, photoID: photoID, accessToken: token)
+            removePhoto(photoID, for: clientID)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func scheduleWorkoutPersist(clientID: UUID, week: Int) {
+        let key = workoutKey(clientID, week)
+        workoutPersistTasks[key]?.cancel()
+        workoutPersistTasks[key] = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            await persistWorkoutWeek(clientID: clientID, week: week)
+        }
+    }
+
+    func scheduleNutritionPersist(for clientID: UUID) {
+        nutritionPersistTasks[clientID]?.cancel()
+        nutritionPersistTasks[clientID] = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            await persistNutrition(for: clientID)
+        }
+    }
+
+    func scheduleWeightPersist(kg: Double, for client: Client) {
+        weightPersistTasks[client.id]?.cancel()
+        weightPersistTasks[client.id] = Task { @MainActor in
+            guard let token = AuthStore.accessToken else { return }
+            _ = try? await VerraAPI.logWeight(clientID: client.id, kg: kg, accessToken: token)
+            if let logs = try? await VerraAPI.fetchWeightLogs(clientID: client.id, accessToken: token) {
+                PlatformLoader.applyWeightLogs(logs, for: client.id, to: self)
+            }
+        }
+    }
+
+    func scheduleModuleVisibilityPersist(for id: UUID) {
+        moduleVisibilityPersistTasks[id]?.cancel()
+        moduleVisibilityPersistTasks[id] = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            await persistModuleVisibility(for: id)
+        }
+    }
+
+    @MainActor
+    private func persistModuleVisibility(for id: UUID) async {
+        guard let token = AuthStore.accessToken else { return }
+        let payload = modules(for: id).map(\.rawValue).sorted()
+        if let dto = try? await VerraAPI.updateClient(
+            id: id,
+            visibleModules: payload,
+            accessToken: token
+        ) {
+            onVisibleModulesPersisted?(id, dto.visibleModules ?? payload)
+        }
+    }
+
+    @MainActor
+    private func persistWorkoutWeek(clientID: UUID, week: Int) async {
+        guard let token = AuthStore.accessToken else { return }
+        let days = workoutWeek(for: clientID, week: week)
+        let body = PlatformLoader.saveWorkoutBody(
+            from: days,
+            weekCount: workoutWeekCount(for: clientID)
+        )
+        if let response = try? await VerraAPI.saveWorkoutWeek(
+            clientID: clientID,
+            week: week,
+            body: body,
+            accessToken: token
+        ) {
+            PlatformLoader.applyWorkoutWeek(response, clientID: clientID, week: week, to: self)
+        }
+    }
+
+    @MainActor
+    private func persistNutrition(for clientID: UUID) async {
+        guard let token = AuthStore.accessToken else { return }
+        let body = VerraAPI.UpdateNutritionBody(
+            proteinG: macros(for: clientID).protein,
+            carbsG: macros(for: clientID).carbs,
+            fatsG: macros(for: clientID).fats,
+            notes: notes(for: clientID).map {
+                VerraAPI.NutritionNoteInput(id: $0.id, text: $0.text)
+            },
+            supplements: supplements(for: clientID).map {
+                VerraAPI.SupplementInput(id: $0.id, name: $0.name, dosage: $0.dosage)
+            }
+        )
+        if let dto = try? await VerraAPI.updateNutrition(
+            clientID: clientID,
+            body: body,
+            accessToken: token
+        ) {
+            PlatformLoader.applyNutrition(dto, clientID: clientID, to: self)
+        }
     }
 }

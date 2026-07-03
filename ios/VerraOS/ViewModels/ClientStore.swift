@@ -36,6 +36,11 @@ final class ClientStore {
         }
     }
 
+    func updateVisibleModules(_ modules: [String], for id: UUID) {
+        guard let index = clients.firstIndex(where: { $0.id == id }) else { return }
+        clients[index].visibleModules = modules
+    }
+
     /// Active (non-archived) clients only.
     var activeClients: [Client] {
         clients.filter { !$0.isArchived }
@@ -43,6 +48,10 @@ final class ClientStore {
 
     var archivedCount: Int {
         clients.filter { $0.isArchived }.count
+    }
+
+    func syncRoster(to schedule: ScheduleStore) {
+        schedule.clients = activeClients
     }
 
     /// Filtered + sorted roster for the directory.

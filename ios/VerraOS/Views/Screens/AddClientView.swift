@@ -9,6 +9,7 @@ import SwiftUI
 /// onboarding friction. Adds the client to the roster as Pending.
 struct AddClientView: View {
     @Environment(ClientStore.self) private var store
+    @Environment(ScheduleStore.self) private var schedule
     @Environment(TrainerStore.self) private var trainer
     @Environment(\.dismiss) private var dismiss
 
@@ -271,12 +272,16 @@ struct AddClientView: View {
                             store.add(client)
                         }
                     }
+                    store.syncRoster(to: schedule)
                 } else {
                     await store.refreshFromServer()
+                    store.syncRoster(to: schedule)
                 }
 
                 if channel == .email && response.emailSent {
                     onInvited("Invite email sent to \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed)")
+                } else if channel == .sms && (response.smsSent == true) {
+                    onInvited("Invite SMS sent to \(contactValue)")
                 } else if channel == .email {
                     onInvited("Invite created for \(trimmed.split(separator: " ").first.map(String.init) ?? trimmed)")
                 } else {

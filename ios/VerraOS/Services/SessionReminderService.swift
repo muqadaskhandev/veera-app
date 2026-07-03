@@ -15,12 +15,12 @@ enum SessionReminderService {
         let granted = await requestAuthorization()
         guard granted else { return }
 
-        let fireDate = sessionDate(for: session).addingTimeInterval(-Double(minutesBefore * 60))
+        let fireDate = session.scheduledAt.addingTimeInterval(-Double(minutesBefore * 60))
         guard fireDate > Date() else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "Upcoming session"
-        content.body = "See \(session.clientName) at \(Session.display(session.startMinutes)) · \(session.location.isEmpty ? session.focus : session.location)"
+        content.title = session.reminderTitle
+        content.body = session.reminderBody
         content.sound = .default
 
         let components = Calendar.current.dateComponents(
@@ -36,6 +36,13 @@ enum SessionReminderService {
         try await center.add(request)
     }
 
+    static func rescheduleAll(for sessions: [Session], minutesBefore: Int) async {
+        cancelAll(for: sessions)
+        for session in sessions where !session.isCompleted && !session.isSkipped && session.accent != .personal {
+            try? await scheduleReminder(for: session, minutesBefore: minutesBefore)
+        }
+    }
+
     static func cancelReminder(for sessionID: UUID) {
         center.removePendingNotificationRequests(withIdentifiers: [notificationID(for: sessionID)])
     }
@@ -47,14 +54,5 @@ enum SessionReminderService {
 
     private static func notificationID(for sessionID: UUID) -> String {
         "verra.session.reminder.\(sessionID.uuidString)"
-    }
-
-    private static func sessionDate(for session: Session) -> Date {
-        let calendar = Calendar.current
-        var components = calendar.dateComponents([.year, .month], from: Date())
-        components.day = session.dayOfMonth
-        components.hour = session.startMinutes / 60
-        components.minute = session.startMinutes % 60
-        return calendar.date(from: components) ?? Date()
     }
 }

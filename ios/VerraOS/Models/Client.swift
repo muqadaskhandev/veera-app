@@ -95,6 +95,8 @@ struct Client: Identifiable, Hashable {
     /// Free-form quick note kept against the client.
     var note: String
     var avatarURL: String?
+    /// Trainer-controlled module visibility from the API; nil uses app defaults.
+    var visibleModules: [String]?
 
     init(
         id: UUID = UUID(),
@@ -115,7 +117,8 @@ struct Client: Identifiable, Hashable {
         primaryGoal: String = "",
         skillLevel: String = "",
         note: String = "",
-        avatarURL: String? = nil
+        avatarURL: String? = nil,
+        visibleModules: [String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -136,6 +139,7 @@ struct Client: Identifiable, Hashable {
         self.skillLevel = skillLevel
         self.note = note
         self.avatarURL = avatarURL
+        self.visibleModules = visibleModules
     }
 
     /// The badge to display, applying override rules:

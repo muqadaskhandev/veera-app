@@ -123,6 +123,7 @@ struct SessionDTO: Content {
 
 struct CreateSessionRequest: Content {
     var clientID: UUID?
+    var trainerID: UUID?
     var clientName: String
     var focus: String
     var location: String?

@@ -77,8 +77,9 @@ struct WearableDataView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.sm)
-                .padding(.bottom, 100)
             }
+            .frame(maxHeight: .infinity)
+            .tabScrollContent()
         }
         .background(Theme.Color.background)
         .task(id: "\(client.id)-\(trainerView)") {

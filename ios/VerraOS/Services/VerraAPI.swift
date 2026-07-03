@@ -347,6 +347,118 @@ enum VerraAPI {
         )
     }
 
+    // MARK: - Google Calendar
+
+    static func fetchGoogleCalendarStatus(accessToken: String) async throws -> GoogleCalendarStatusResponse {
+        try await APIClient.shared.request("/api/calendar/google/status", token: accessToken)
+    }
+
+    static func fetchGoogleCalendarAuthorize(accessToken: String) async throws -> GoogleCalendarAuthorizeResponse {
+        try await APIClient.shared.request("/api/calendar/google/authorize", token: accessToken)
+    }
+
+    struct GoogleCalendarCallbackBody: Encodable {
+        let code: String
+        let state: String
+    }
+
+    static func completeGoogleCalendarOAuth(code: String, state: String, accessToken: String) async throws -> GoogleCalendarStatusResponse {
+        try await APIClient.shared.request(
+            "/api/calendar/google/callback",
+            method: "POST",
+            body: GoogleCalendarCallbackBody(code: code, state: state),
+            token: accessToken
+        )
+    }
+
+    static func disconnectGoogleCalendar(accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/calendar/google",
+            method: "DELETE",
+            token: accessToken
+        )
+    }
+
+    struct BusyBlockDTO: Decodable {
+        let id: String
+        let title: String
+        let startDate: Date
+        let durationMinutes: Int
+    }
+
+    static func fetchGoogleBusyBlocks(from: Date, to: Date, accessToken: String) async throws -> [BusyBlockDTO] {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let fromValue = formatter.string(from: from)
+        let toValue = formatter.string(from: to)
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "from", value: fromValue),
+            URLQueryItem(name: "to", value: toValue),
+        ]
+        let query = components.percentEncodedQuery.map { "?\($0)" } ?? ""
+        return try await APIClient.shared.request(
+            "/api/calendar/google/busy-blocks\(query)",
+            token: accessToken
+        )
+    }
+
+    struct GoogleCalendarExportBody: Encodable {
+        let sessionID: UUID
+        let clientName: String
+        let focus: String
+        let scheduledAt: Date
+        let durationMinutes: Int
+        let location: String?
+        let notes: String?
+        let reminderMinutesBefore: Int?
+        let useDedicatedCalendar: Bool?
+    }
+
+    static func exportSessionToGoogleCalendar(_ body: GoogleCalendarExportBody, accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/calendar/google/export",
+            method: "POST",
+            body: body,
+            token: accessToken
+        )
+    }
+
+    struct GoogleCalendarExportAllBody: Encodable {
+        struct SessionPayload: Encodable {
+            let sessionID: UUID
+            let clientName: String
+            let focus: String
+            let scheduledAt: Date
+            let durationMinutes: Int
+            let location: String?
+            let notes: String?
+            let isSkipped: Bool
+            let accent: String
+        }
+
+        let sessions: [SessionPayload]
+        let reminderMinutesBefore: Int?
+        let useDedicatedCalendar: Bool?
+    }
+
+    static func exportAllSessionsToGoogleCalendar(_ body: GoogleCalendarExportAllBody, accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/calendar/google/export-all",
+            method: "POST",
+            body: body,
+            token: accessToken
+        )
+    }
+
+    static func deleteGoogleCalendarExport(sessionID: UUID, accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/calendar/google/export/\(sessionID.uuidString)",
+            method: "DELETE",
+            token: accessToken
+        )
+    }
+
     struct CreateInviteBody: Encodable {
         let expiresInDays: Int?
         let clientEmail: String?
@@ -365,6 +477,7 @@ enum VerraAPI {
     struct InviteCreatedResponse: Decodable {
         let invite: InviteCodeDTO
         let emailSent: Bool
+        let smsSent: Bool?
         let client: ClientDTO?
     }
 
@@ -547,6 +660,7 @@ enum VerraAPI {
         let weightKg: Int?
         let goalWeightKg: Int?
         let note: String?
+        let visibleModules: [String]?
     }
 
     static func updateClient(
@@ -556,6 +670,7 @@ enum VerraAPI {
         weightKg: Int? = nil,
         goalWeightKg: Int? = nil,
         note: String? = nil,
+        visibleModules: [String]? = nil,
         accessToken: String
     ) async throws -> ClientDTO {
         try await APIClient.shared.request(
@@ -566,7 +681,8 @@ enum VerraAPI {
                 heightCm: heightCm,
                 weightKg: weightKg,
                 goalWeightKg: goalWeightKg,
-                note: note
+                note: note,
+                visibleModules: visibleModules
             ),
             token: accessToken
         )
@@ -606,6 +722,393 @@ enum VerraAPI {
                     attachmentURL: $0.attachmentURL
                 )
             }),
+            token: accessToken
+        )
+    }
+
+    // MARK: - Sessions
+
+    struct CreateSessionBody: Encodable {
+        let clientID: UUID?
+        let clientName: String
+        let focus: String
+        let location: String
+        let accent: String
+        let initials: String
+        let scheduledAt: Date
+        let durationMinutes: Int
+        let notes: String
+    }
+
+    struct UpdateSessionBody: Encodable {
+        let clientID: UUID?
+        let clientName: String?
+        let focus: String?
+        let location: String?
+        let accent: String?
+        let initials: String?
+        let scheduledAt: Date?
+        let durationMinutes: Int?
+        let notes: String?
+        let isCompleted: Bool?
+        let isSkipped: Bool?
+        let isCancelled: Bool?
+    }
+
+    static func fetchSessions(accessToken: String) async throws -> [SessionDTO] {
+        try await APIClient.shared.request("/api/sessions", token: accessToken)
+    }
+
+    static func createSession(_ body: CreateSessionBody, accessToken: String) async throws -> SessionDTO {
+        try await APIClient.shared.request("/api/sessions", method: "POST", body: body, token: accessToken)
+    }
+
+    static func updateSession(id: UUID, body: UpdateSessionBody, accessToken: String) async throws -> SessionDTO {
+        try await APIClient.shared.request("/api/sessions/\(id.uuidString)", method: "PATCH", body: body, token: accessToken)
+    }
+
+    static func deleteSession(id: UUID, accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/sessions/\(id.uuidString)",
+            method: "DELETE",
+            token: accessToken
+        )
+    }
+
+    // MARK: - Financials
+
+    struct FinancialEventDTO: Codable {
+        let id: UUID
+        let trainerID: UUID
+        let clientID: UUID?
+        let sessionID: UUID?
+        let clientName: String?
+        let kind: String
+        let title: String
+        let detail: String
+        let amount: Double?
+        let sessionDelta: Int
+        let occurredAt: Date
+    }
+
+    struct FinancialSummaryDTO: Codable {
+        let revenue: Double
+        let sessionsUsed: Int
+        let events: [FinancialEventDTO]
+    }
+
+    static func fetchFinancialSummary(filter: String, accessToken: String) async throws -> FinancialSummaryDTO {
+        try await APIClient.shared.request("/api/financials?filter=\(filter)", token: accessToken)
+    }
+
+    static func createFinancialEvent(_ body: CreateFinancialEventBody, accessToken: String) async throws -> FinancialEventDTO {
+        try await APIClient.shared.request("/api/financials", method: "POST", body: body, token: accessToken)
+    }
+
+    struct CreateFinancialEventBody: Encodable {
+        let clientID: UUID
+        let kind: String
+        let title: String
+        let detail: String?
+        let amount: Double?
+        let sessionDelta: Int?
+    }
+
+    // MARK: - Workouts & profile modules
+
+    struct WorkoutExerciseDTO: Codable {
+        let id: UUID?
+        let exerciseID: UUID?
+        let name: String
+        let category: String?
+        let sets: Int?
+        let reps: Int?
+        let kind: String
+    }
+
+    struct WorkoutDayDTO: Codable {
+        let id: UUID?
+        let label: String
+        let focus: String?
+        let exercises: [WorkoutExerciseDTO]
+    }
+
+    struct WorkoutWeekResponse: Codable {
+        let weekIndex: Int
+        let weekCount: Int
+        let days: [WorkoutDayDTO]
+    }
+
+    struct SaveWorkoutWeekBody: Encodable {
+        let days: [WorkoutDayDTO]
+        let weekCount: Int?
+    }
+
+    static func fetchWorkoutWeek(clientID: UUID, week: Int, accessToken: String) async throws -> WorkoutWeekResponse {
+        try await APIClient.shared.request("/api/clients/\(clientID.uuidString)/workouts?week=\(week)", token: accessToken)
+    }
+
+    static func saveWorkoutWeek(clientID: UUID, week: Int, body: SaveWorkoutWeekBody, accessToken: String) async throws -> WorkoutWeekResponse {
+        try await APIClient.shared.request(
+            "/api/clients/\(clientID.uuidString)/workouts/\(week)",
+            method: "PUT",
+            body: body,
+            token: accessToken
+        )
+    }
+
+    struct WeightLogDTO: Codable {
+        let id: UUID
+        let kg: Double
+        let recordedAt: Date
+    }
+
+    static func fetchWeightLogs(clientID: UUID, accessToken: String) async throws -> [WeightLogDTO] {
+        try await APIClient.shared.request("/api/clients/\(clientID.uuidString)/weight", token: accessToken)
+    }
+
+    static func logWeight(clientID: UUID, kg: Double, accessToken: String) async throws -> WeightLogDTO {
+        struct Body: Encodable { let kg: Double }
+        return try await APIClient.shared.request(
+            "/api/clients/\(clientID.uuidString)/weight",
+            method: "POST",
+            body: Body(kg: kg),
+            token: accessToken
+        )
+    }
+
+    struct NutritionProfileDTO: Codable {
+        let proteinG: Int
+        let carbsG: Int
+        let fatsG: Int
+        let calories: Int
+        let notes: [NutritionNoteDTO]
+        let supplements: [SupplementDTO]
+    }
+
+    struct NutritionNoteDTO: Codable {
+        let id: UUID
+        let text: String
+    }
+
+    struct SupplementDTO: Codable {
+        let id: UUID
+        let name: String
+        let dosage: String
+    }
+
+    static func fetchNutrition(clientID: UUID, accessToken: String) async throws -> NutritionProfileDTO {
+        try await APIClient.shared.request("/api/clients/\(clientID.uuidString)/nutrition", token: accessToken)
+    }
+
+    struct NutritionNoteInput: Encodable {
+        let id: UUID?
+        let text: String
+    }
+
+    struct SupplementInput: Encodable {
+        let id: UUID?
+        let name: String
+        let dosage: String
+    }
+
+    struct UpdateNutritionBody: Encodable {
+        let proteinG: Int?
+        let carbsG: Int?
+        let fatsG: Int?
+        let notes: [NutritionNoteInput]?
+        let supplements: [SupplementInput]?
+    }
+
+    static func updateNutrition(clientID: UUID, body: UpdateNutritionBody, accessToken: String) async throws -> NutritionProfileDTO {
+        try await APIClient.shared.request(
+            "/api/clients/\(clientID.uuidString)/nutrition",
+            method: "PATCH",
+            body: body,
+            token: accessToken
+        )
+    }
+
+    struct ProgressPhotoDTO: Codable {
+        let id: UUID
+        let imageURL: String
+        let capturedAt: Date
+    }
+
+    static func fetchProgressPhotos(clientID: UUID, accessToken: String) async throws -> [ProgressPhotoDTO] {
+        try await APIClient.shared.request("/api/clients/\(clientID.uuidString)/photos", token: accessToken)
+    }
+
+    static func uploadProgressPhoto(clientID: UUID, imageData: Data, accessToken: String) async throws -> ProgressPhotoDTO {
+        try await APIClient.shared.upload(
+            path: "/api/clients/\(clientID.uuidString)/photos",
+            fieldName: "photo",
+            fileData: imageData,
+            filename: "photo.jpg",
+            mimeType: "image/jpeg",
+            token: accessToken
+        )
+    }
+
+    static func deleteProgressPhoto(clientID: UUID, photoID: UUID, accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/clients/\(clientID.uuidString)/photos/\(photoID.uuidString)",
+            method: "DELETE",
+            token: accessToken
+        )
+    }
+
+    struct ExerciseDTO: Codable {
+        let id: UUID
+        let name: String
+        let category: String
+        let description: String?
+        let imageURL: String?
+        let videoURL: String?
+    }
+
+    static func fetchExerciseCategories(accessToken: String) async throws -> [String] {
+        try await APIClient.shared.request("/api/exercises/categories", token: accessToken)
+    }
+
+    static func fetchExercises(
+        query: String? = nil,
+        category: String? = nil,
+        limit: Int = 30,
+        accessToken: String
+    ) async throws -> [ExerciseDTO] {
+        var parts: [String] = []
+        if let query, !query.isEmpty {
+            let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+            parts.append("q=\(encoded)")
+        }
+        if let category, !category.isEmpty {
+            parts.append("category=\(category)")
+        }
+        parts.append("limit=\(limit)")
+        let queryString = parts.joined(separator: "&")
+        return try await APIClient.shared.request("/api/exercises?\(queryString)", token: accessToken)
+    }
+
+    static func fetchExercise(id: UUID, accessToken: String) async throws -> ExerciseDTO {
+        try await APIClient.shared.request("/api/exercises/\(id.uuidString)", token: accessToken)
+    }
+
+    static func createExercise(
+        name: String,
+        category: String,
+        description: String?,
+        accessToken: String
+    ) async throws -> ExerciseDTO {
+        struct Body: Encodable {
+            let name: String
+            let category: String
+            let description: String?
+        }
+        return try await APIClient.shared.request(
+            "/api/exercises",
+            method: "POST",
+            body: Body(name: name, category: category, description: description),
+            token: accessToken
+        )
+    }
+
+    static func uploadExerciseImage(exerciseID: UUID, imageData: Data, accessToken: String) async throws -> ExerciseDTO {
+        try await APIClient.shared.upload(
+            path: "/api/exercises/\(exerciseID.uuidString)/image",
+            fieldName: "image",
+            fileData: imageData,
+            filename: "exercise.jpg",
+            mimeType: "image/jpeg",
+            token: accessToken
+        )
+    }
+
+    static func uploadExerciseVideo(exerciseID: UUID, videoData: Data, accessToken: String) async throws -> ExerciseDTO {
+        try await APIClient.shared.upload(
+            path: "/api/exercises/\(exerciseID.uuidString)/video",
+            fieldName: "video",
+            fileData: videoData,
+            filename: "exercise.mp4",
+            mimeType: "video/mp4",
+            token: accessToken
+        )
+    }
+
+    static func searchExercises(query: String, accessToken: String) async throws -> [ExerciseDTO] {
+        try await fetchExercises(query: query, accessToken: accessToken)
+    }
+
+    // MARK: - Notifications
+
+    struct UserNotificationDTO: Codable {
+        let id: UUID
+        let category: String
+        let title: String
+        let body: String
+        let isRead: Bool
+        let createdAt: Date?
+    }
+
+    struct NotificationPreferencesDTO: Codable {
+        let notifySchedule: Bool
+        let notifyMessages: Bool
+        let notifyActivity: Bool
+        let smsEnabled: Bool
+        let reminderMinutesBefore: Int
+    }
+
+    static func fetchNotifications(accessToken: String) async throws -> [UserNotificationDTO] {
+        try await APIClient.shared.request("/api/notifications", token: accessToken)
+    }
+
+    static func markNotificationRead(id: UUID, accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/notifications/\(id.uuidString)/read",
+            method: "PATCH",
+            token: accessToken
+        )
+    }
+
+    static func markAllNotificationsRead(accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/notifications/read-all",
+            method: "PATCH",
+            token: accessToken
+        )
+    }
+
+    static func fetchNotificationPreferences(accessToken: String) async throws -> NotificationPreferencesDTO {
+        try await APIClient.shared.request("/api/notifications/preferences", token: accessToken)
+    }
+
+    static func updateNotificationPreferences(_ body: NotificationPreferencesDTO, accessToken: String) async throws -> NotificationPreferencesDTO {
+        try await APIClient.shared.request(
+            "/api/notifications/preferences",
+            method: "PATCH",
+            body: body,
+            token: accessToken
+        )
+    }
+
+    // MARK: - Subscriptions
+
+    struct SubscriptionDTO: Codable {
+        let productID: String
+        let status: String
+        let expiresAt: Date?
+        let isActive: Bool
+    }
+
+    static func validateReceipt(receiptData: String, productID: String, accessToken: String) async throws -> SubscriptionDTO {
+        struct Body: Encodable {
+            let receiptData: String
+            let productID: String
+        }
+        return try await APIClient.shared.request(
+            "/api/subscriptions/validate",
+            method: "POST",
+            body: Body(receiptData: receiptData, productID: productID),
             token: accessToken
         )
     }

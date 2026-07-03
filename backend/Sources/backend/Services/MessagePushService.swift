@@ -13,6 +13,8 @@ enum MessagePushService {
             .first() {
             existing.$user.id = try user.requireID()
             existing.platform = platform
+            existing.invalidatedAt = nil
+            existing.lastError = nil
             try await existing.save(on: database)
             return
         }
@@ -43,22 +45,23 @@ enum MessagePushService {
             return
         }
 
-        let tokens = try? await PushDeviceToken.query(on: app.db)
-            .filter(\.$user.$id == userID)
-            .all()
-
-        guard let tokens, !tokens.isEmpty else {
-            app.logger.info("Push skipped for user \(userID) — no device tokens registered")
+        let tokens = (try? await PushTokenService.activeTokens(for: userID, on: app.db)) ?? []
+        guard !tokens.isEmpty else {
+            app.logger.info("Push skipped for user \(userID) — no active device tokens")
             return
         }
 
         for record in tokens {
-            await APNsService.sendAlert(
-                to: record.token,
+            _ = try? await NotificationDeliveryService.sendPushAlert(
+                userID: userID,
+                deviceToken: record.token,
                 title: title,
                 body: body,
+                kind: .chatMessage,
                 conversationID: conversationID,
-                on: app
+                sessionID: nil,
+                on: app.db,
+                app: app
             )
         }
     }

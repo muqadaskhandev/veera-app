@@ -38,6 +38,7 @@ enum AppointmentType: CaseIterable, Identifiable {
 /// detail card's Edit action (pre-filled).
 struct AddEditAppointmentView: View {
     @Environment(ScheduleStore.self) private var store
+    @Environment(ClientStore.self) private var clientStore
     @Environment(\.dismiss) private var dismiss
 
     /// nil → creating a new appointment; non-nil → editing.
@@ -77,9 +78,15 @@ struct AddEditAppointmentView: View {
 
     private var isEditing: Bool { existing != nil }
 
+    private var rosterClients: [Client] {
+        clientStore.activeClients.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
     private var filteredClients: [Client] {
-        guard !clientSearch.isEmpty else { return store.clients }
-        return store.clients.filter { $0.name.localizedCaseInsensitiveContains(clientSearch) }
+        guard !clientSearch.isEmpty else { return rosterClients }
+        return rosterClients.filter { $0.name.localizedCaseInsensitiveContains(clientSearch) }
     }
 
     private var canSave: Bool {
@@ -106,7 +113,7 @@ struct AddEditAppointmentView: View {
 
     /// Live remaining-session balance for the picked client.
     private var clientRemaining: Int {
-        store.clients.first { $0.id == selectedClient?.id }?.sessionsRemaining ?? 0
+        clientStore.clients.first { $0.id == selectedClient?.id }?.sessionsRemaining ?? 0
     }
 
     /// How many sessions the series may generate. Repeat stops once the balance
@@ -175,13 +182,19 @@ struct AddEditAppointmentView: View {
             }
             .onAppear(perform: preselectClient)
             .alert("Schedule Conflict", isPresented: $showConflictAlert) {
-                Button("Cancel", role: .cancel) { pendingCommit = nil }
-                Button("Save Anyway") {
-                    pendingCommit?()
-                    pendingCommit = nil
+                if store.blockConflictsOnSave {
+                    Button("OK", role: .cancel) {}
+                } else {
+                    Button("Cancel", role: .cancel) { pendingCommit = nil }
+                    Button("Save Anyway") {
+                        pendingCommit?()
+                        pendingCommit = nil
+                    }
                 }
             } message: {
-                Text(conflictMessage)
+                Text(store.blockConflictsOnSave
+                    ? "This time overlaps another session or personal calendar event. Choose a different time to continue.\n\n\(conflictMessage)"
+                    : conflictMessage)
             }
         }
     }
@@ -189,19 +202,15 @@ struct AddEditAppointmentView: View {
     private var currentConflicts: [ScheduleConflict] {
         if isMultiDay {
             return activeOccurrences.flatMap { occurrence in
-                let dom = Calendar.current.component(.day, from: occurrence)
-                return store.detectConflicts(
-                    dayOfMonth: dom,
-                    startMinutes: startMinutes,
+                store.detectConflicts(
+                    at: occurrence,
                     durationMinutes: durationMinutes,
                     excludingSessionID: existing?.id
                 )
             }
         }
-        let day = Calendar.current.component(.day, from: date)
         return store.detectConflicts(
-            dayOfMonth: day,
-            startMinutes: startMinutes,
+            at: date,
             durationMinutes: durationMinutes,
             excludingSessionID: existing?.id
         )
@@ -284,14 +293,11 @@ struct AddEditAppointmentView: View {
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { selectedClient = client }
                     } label: {
                         HStack(spacing: 12) {
-                            Circle()
-                                .fill(isSelected ? Theme.Color.ink : Theme.Color.surfaceMuted)
-                                .frame(width: 38, height: 38)
-                                .overlay(
-                                    Text(client.initials)
-                                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                                        .foregroundStyle(isSelected ? Theme.Color.accent : Theme.Color.inkMuted)
-                                )
+                            ChatParticipantAvatar(
+                                initials: client.initials,
+                                avatarURL: client.avatarURL,
+                                size: 38
+                            )
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(client.name)
                                     .font(.system(size: 15, weight: .semibold))
@@ -317,7 +323,7 @@ struct AddEditAppointmentView: View {
                     }
                 }
                 if filteredClients.isEmpty {
-                    Text("No clients match \"\(clientSearch)\"")
+                    Text(clientSearch.isEmpty ? "No clients yet" : "No clients match \"\(clientSearch)\"")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.Color.inkMuted)
                         .frame(maxWidth: .infinity)
@@ -469,13 +475,18 @@ struct AddEditAppointmentView: View {
 
     private func preselectClient() {
         guard selectedClient == nil, let existing else { return }
-        selectedClient = store.clients.first { $0.name == existing.clientName }
+        selectedClient = rosterClients.first { $0.name == existing.clientName }
     }
 
     private func save() {
         let conflicts = currentConflicts
         if !conflicts.isEmpty {
             conflictMessage = conflicts.map { "\($0.title) (\($0.timeRange))" }.joined(separator: "\n")
+            if store.blockConflictsOnSave {
+                showConflictAlert = true
+                pendingCommit = nil
+                return
+            }
             pendingCommit = commitSave
             showConflictAlert = true
             return
@@ -487,19 +498,21 @@ struct AddEditAppointmentView: View {
         let tag = type.tag
         let name = selectedClient?.name ?? "Client"
         let initials = selectedClient?.initials ?? "?"
+        let clientID = selectedClient?.id
         let location = existing?.location ?? "Studio A"
 
         if isMultiDay {
             let days = activeOccurrences
             withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
                 for occurrence in days {
-                    let dom = Calendar.current.component(.day, from: occurrence)
                     store.upsert(Session.make(
                         id: UUID(),
+                        clientID: clientID,
                         clientName: name,
                         initials: initials,
-                        dayOfMonth: dom,
+                        dayOfMonth: Calendar.current.component(.day, from: occurrence),
                         startMinutes: startMinutes,
+                        scheduledAt: occurrence,
                         durationMinutes: durationMinutes,
                         accent: tag,
                         location: location,
@@ -514,13 +527,14 @@ struct AddEditAppointmentView: View {
             return
         }
 
-        let day = Calendar.current.component(.day, from: date)
         let session = Session.make(
             id: existing?.id ?? UUID(),
+            clientID: clientID ?? existing?.clientID,
             clientName: name,
             initials: initials,
-            dayOfMonth: day,
+            dayOfMonth: Calendar.current.component(.day, from: date),
             startMinutes: startMinutes,
+            scheduledAt: date,
             durationMinutes: durationMinutes,
             accent: tag,
             location: location,
@@ -538,13 +552,6 @@ struct AddEditAppointmentView: View {
     }
 
     private static func initialDate(for existing: Session?) -> Date {
-        var comps = DateComponents()
-        comps.year = 2026
-        comps.month = 6
-        comps.day = existing?.dayOfMonth ?? 17
-        let minutes = existing?.startMinutes ?? 540
-        comps.hour = minutes / 60
-        comps.minute = minutes % 60
-        return Calendar.current.date(from: comps) ?? Date()
+        existing?.scheduledAt ?? Date()
     }
 }

@@ -15,7 +15,8 @@ struct APNsAlertPayload: Content {
     }
 
     var aps: APS
-    var conversationID: String
+    var conversationID: String?
+    var sessionID: String?
 }
 
 private struct APNsAuthClaims: JWTPayload {
@@ -38,13 +39,104 @@ enum APNsService {
         badge: Int? = 1,
         on app: Application
     ) async {
+        _ = await sendAlertWithResult(
+            to: deviceToken,
+            title: title,
+            body: body,
+            conversationID: conversationID,
+            badge: badge,
+            on: app
+        )
+    }
+
+    static func sendAlertWithResult(
+        to deviceToken: String,
+        title: String,
+        body: String,
+        conversationID: UUID,
+        badge: Int? = 1,
+        on app: Application
+    ) async -> APNsSendResult {
+        await sendPayloadWithResult(
+            to: deviceToken,
+            title: title,
+            body: body,
+            conversationID: conversationID.uuidString,
+            sessionID: nil,
+            badge: badge,
+            on: app
+        )
+    }
+
+    static func sendSessionReminder(
+        to deviceToken: String,
+        title: String,
+        body: String,
+        sessionID: UUID,
+        on app: Application
+    ) async {
+        _ = await sendSessionReminderWithResult(
+            to: deviceToken,
+            title: title,
+            body: body,
+            sessionID: sessionID,
+            on: app
+        )
+    }
+
+    static func sendSessionReminderWithResult(
+        to deviceToken: String,
+        title: String,
+        body: String,
+        sessionID: UUID,
+        on app: Application
+    ) async -> APNsSendResult {
+        await sendPayloadWithResult(
+            to: deviceToken,
+            title: title,
+            body: body,
+            conversationID: nil,
+            sessionID: sessionID.uuidString,
+            badge: 1,
+            on: app
+        )
+    }
+
+    static func sendGenericWithResult(
+        to deviceToken: String,
+        title: String,
+        body: String,
+        on app: Application
+    ) async -> APNsSendResult {
+        await sendPayloadWithResult(
+            to: deviceToken,
+            title: title,
+            body: body,
+            conversationID: nil,
+            sessionID: nil,
+            badge: 1,
+            on: app
+        )
+    }
+
+    private static func sendPayloadWithResult(
+        to deviceToken: String,
+        title: String,
+        body: String,
+        conversationID: String?,
+        sessionID: String?,
+        badge: Int?,
+        on app: Application
+    ) async -> APNsSendResult {
         guard let config = config(on: app) else {
             app.logger.debug("APNs skipped — not configured")
-            return
+            return APNsSendResult(accepted: false, statusCode: 0, reason: "APNs not configured")
         }
 
         let token = deviceToken.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !token.isEmpty else { return }
+        guard !token.isEmpty else {
+            return APNsSendResult(accepted: false, statusCode: 0, reason: "Empty device token")
+        }
 
         do {
             let jwt = try makeAuthToken(config: config)
@@ -54,7 +146,8 @@ enum APNsService {
                     sound: "default",
                     badge: badge
                 ),
-                conversationID: conversationID.uuidString
+                conversationID: conversationID,
+                sessionID: sessionID
             )
 
             let host = config.useSandbox
@@ -70,14 +163,17 @@ enum APNsService {
                 try request.content.encode(payload, as: .json)
             }
 
+            let reason = response.body.map { String(buffer: $0) } ?? nil
             if response.status == .ok {
-                app.logger.info("APNs delivered to \(token.prefix(8))…")
-            } else {
-                let reason = response.body.map { String(buffer: $0) } ?? "unknown"
-                app.logger.warning("APNs failed (\(response.status.code)): \(reason)")
+                app.logger.info("APNs accepted for \(token.prefix(8))…")
+                return APNsSendResult(accepted: true, statusCode: Int(response.status.code), reason: reason)
             }
+
+            app.logger.warning("APNs failed (\(response.status.code)): \(reason ?? "unknown")")
+            return APNsSendResult(accepted: false, statusCode: Int(response.status.code), reason: reason)
         } catch {
             app.logger.warning("APNs error: \(error.localizedDescription)")
+            return APNsSendResult(accepted: false, statusCode: 0, reason: error.localizedDescription)
         }
     }
 

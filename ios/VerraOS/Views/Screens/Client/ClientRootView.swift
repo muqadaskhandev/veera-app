@@ -114,7 +114,6 @@ struct ClientRootView: View {
         _conversationID = State(initialValue: store.conversations.first?.id ?? UUID())
 
         let p = ProfileStore()
-        p.setVisibleModules([.workout, .wearables, .weight, .nutrition, .photos, .financials], for: placeholder.id)
         _profile = State(initialValue: p)
     }
 
@@ -185,6 +184,7 @@ struct ClientRootView: View {
         .task {
             await account.refreshFromServer()
             syncFromAccount()
+            await schedule.refreshFromServer()
             await wearables.refreshFromServer()
             if let clientID = account.client?.id {
                 await healthData.refreshForClient(clientID: clientID, trainerView: false)
@@ -219,17 +219,8 @@ struct ClientRootView: View {
         clients.clients = [loaded]
         schedule.clients = [loaded]
         trainer.profile = account.coachProfile
-        if let start = loaded.weightKg.map(Double.init) {
-            profile.setWeightTargets(
-                start: start,
-                goal: loaded.goalWeightKg.map(Double.init),
-                for: loaded
-            )
-        }
-        profile.setVisibleModules(
-            [.workout, .wearables, .weight, .nutrition, .photos, .financials],
-            for: loaded.id
-        )
+        profile.applyWeightTargets(from: loaded)
+        profile.applyVisibleModules(loaded.visibleModules, for: loaded.id)
     }
 
     // MARK: Shell
@@ -243,7 +234,7 @@ struct ClientRootView: View {
                 )
             }
 
-            ZStack {
+            Group {
                 switch tab {
                 case .dashboard:
                     ClientDashboardView(
@@ -253,7 +244,7 @@ struct ClientRootView: View {
                         onEditProfile: { showingEditDetails = true }
                     )
                 case .schedule:
-                    ClientScheduleView(clientName: client.name)
+                    ClientScheduleView(clientID: client.id, clientName: client.name)
                 case .wearables:
                     ClientWearablesView(clientID: client.id)
                 case .messages:
@@ -267,13 +258,14 @@ struct ClientRootView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .transition(.opacity)
-
-            if tab != .messages {
-                ClientTabBar(selected: tab, messagesUnreadCount: messages.unreadCount) { newTab in
-                    guard newTab != tab else { return }
-                    withAnimation(.easeInOut(duration: 0.2)) { tab = newTab }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if tab != .messages {
+                    ClientTabBar(selected: tab, messagesUnreadCount: messages.unreadCount) { newTab in
+                        guard newTab != tab else { return }
+                        withAnimation(.easeInOut(duration: 0.2)) { tab = newTab }
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .background(Theme.Color.background)

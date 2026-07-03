@@ -12,10 +12,12 @@ import SwiftUI
 /// Minimalist vertical timeline: a week date strip plus color-coded session
 /// blocks (time on the left, client name on the right).
 struct DayTimelineView: View {
-    let week: [(day: String, date: Int)]
-    @Binding var selectedDay: Int
+    let week: [Date]
+    @Binding var selectedDate: Date
     let sessions: [Session]
     var onSelectSession: (Session) -> Void
+
+    private var calendar: Calendar { Calendar.current }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
@@ -34,18 +36,18 @@ struct DayTimelineView: View {
 
     private var dateStrip: some View {
         HStack(spacing: 8) {
-            ForEach(Array(week.enumerated()), id: \.offset) { _, item in
-                let isActive = item.date == selectedDay
+            ForEach(week, id: \.self) { date in
+                let isActive = calendar.isDate(date, inSameDayAs: selectedDate)
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                        selectedDay = item.date
+                        selectedDate = date
                     }
                 } label: {
                     VStack(spacing: 7) {
-                        Text(item.day)
+                        Text(ScheduleCalendar.weekdayLabel(for: date, calendar: calendar))
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(isActive ? Theme.Color.accentInk.opacity(0.7) : Theme.Color.inkFaint)
-                        Text("\(item.date)")
+                        Text("\(ScheduleCalendar.dayOfMonth(for: date, calendar: calendar))")
                             .font(.system(size: 17, weight: .bold, design: .rounded))
                             .foregroundStyle(isActive ? Theme.Color.accentInk : Theme.Color.ink)
                     }
@@ -88,7 +90,7 @@ private struct TimelineRow: View {
     var onTap: () -> Void
 
     private var isBusyBlock: Bool {
-        session.notes == "Imported from Apple Calendar"
+        session.notes == CalendarSyncService.importedMarker
     }
 
     var body: some View {
@@ -169,23 +171,36 @@ private struct PressableRowStyle: ButtonStyle {
 
 // MARK: - Month grid
 
-/// A full month grid (June 2026) with colored dots under days that have
-/// sessions. Tapping a day opens it in Day view.
+/// A full month grid with colored dots under days that have sessions.
+/// Tapping a day opens it in Day view.
 struct MonthGridView: View {
     let sessions: [Session]
-    let selectedDay: Int
-    let onSelectDay: (Int) -> Void
+    let monthAnchor: Date
+    let selectedDate: Date
+    let onSelectDate: (Date) -> Void
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
     private let weekdaySymbols = ["M", "T", "W", "T", "F", "S", "S"]
-    // June 1, 2026 is a Monday → no leading blanks.
-    private let leadingBlanks = 0
-    private let daysInMonth = 30
+
+    private var calendar: Calendar { Calendar.current }
+
+    private var daysInMonth: Int {
+        calendar.range(of: .day, in: .month, for: monthAnchor)?.count ?? 30
+    }
+
+    /// Monday-based leading blanks (Mon = 0 … Sun = 6).
+    private var leadingBlanks: Int {
+        guard let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: monthAnchor)) else {
+            return 0
+        }
+        let weekday = calendar.component(.weekday, from: monthStart)
+        return (weekday + 5) % 7
+    }
 
     var body: some View {
         VStack(spacing: 10) {
             HStack {
-                Text("June 2026")
+                Text(monthAnchor.formatted(.dateTime.month(.wide).year()))
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(Theme.Color.ink)
                 Spacer()
@@ -205,12 +220,13 @@ struct MonthGridView: View {
                     Color.clear.frame(height: 46)
                 }
                 ForEach(1...daysInMonth, id: \.self) { day in
+                    let date = ScheduleCalendar.date(in: monthAnchor, day: day, calendar: calendar) ?? monthAnchor
                     MonthCell(
                         day: day,
-                        isSelected: day == selectedDay,
-                        tints: dotTints(for: day)
+                        isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
+                        tints: dotTints(for: date)
                     )
-                    .onTapGesture { onSelectDay(day) }
+                    .onTapGesture { onSelectDate(date) }
                 }
             }
         }
@@ -223,10 +239,8 @@ struct MonthGridView: View {
         .cardShadow()
     }
 
-    private func dotTints(for day: Int) -> [Color] {
-        sessions
-            .filter { $0.dayOfMonth == day }
-            .sorted { $0.startMinutes < $1.startMinutes }
+    private func dotTints(for date: Date) -> [Color] {
+        ScheduleCalendar.sessions(sessions, on: date, calendar: calendar)
             .prefix(3)
             .map { $0.accent.tint }
     }

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verra Admin</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Login -->
+    <div id="login-view" class="login-view hidden">
+      <div class="login-card">
+        <div class="brand">
+          <span class="brand-mark">V</span>
+          <h1>Verra Admin</h1>
+          <p>Platform management dashboard</p>
+        </div>
+        <form id="login-form">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" required autocomplete="username">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required autocomplete="current-password">
+          <p id="login-error" class="error hidden"></p>
+          <button type="submit" class="btn btn-primary">Sign in</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- App shell -->
+    <div id="shell" class="shell hidden">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <span class="brand-mark">V</span>
+          <span>Verra Admin</span>
+        </div>
+        <nav id="nav">
+          <button data-page="dashboard" class="nav-item active">Dashboard</button>
+          <button data-page="users" class="nav-item">Users</button>
+          <button data-page="clients" class="nav-item">Clients</button>
+          <button data-page="subscriptions" class="nav-item">Subscriptions</button>
+          <button data-page="sessions" class="nav-item">Sessions</button>
+          <button data-page="invites" class="nav-item">Invites</button>
+          <button data-page="deliveries" class="nav-item">Deliveries</button>
+          <button data-page="exercises" class="nav-item">Exercises</button>
+        </nav>
+        <div class="sidebar-footer">
+          <span id="admin-email" class="admin-email"></span>
+          <button id="logout-btn" class="btn btn-ghost btn-sm">Sign out</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="page-header">
+          <h2 id="page-title">Dashboard</h2>
+          <button id="refresh-btn" class="btn btn-ghost btn-sm">Refresh</button>
+        </header>
+
+        <div id="toast" class="toast hidden"></div>
+        <div id="page-content" class="page-content"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="/admin/admin.js"></script>
+</body>
+</html>

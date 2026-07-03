@@ -40,8 +40,8 @@ enum OuraAuthService {
             throw APIError.invalidURL
         }
 
-        let callbackScheme = callbackScheme(from: authorize.redirectURI)
-        let callbackURL = try await OuraWebAuthCoordinator.shared.start(url: authURL, callbackScheme: callbackScheme)
+        let callbackScheme = OAuthCallback.scheme(from: authorize.redirectURI)
+        let callbackURL = try await OAuthWebAuthCoordinator.shared.start(url: authURL, callbackScheme: callbackScheme)
 
         guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
             throw OuraAuthError.missingCode
@@ -57,95 +57,6 @@ enum OuraAuthService {
         }
 
         _ = try await VerraAPI.completeOuraOAuth(code: code, state: state, accessToken: accessToken)
-    }
-
-    /// ASWebAuthenticationSession expects the URL *scheme* only, not the full redirect URI.
-    private static func callbackScheme(from redirectURI: String) -> String {
-        if let scheme = URL(string: redirectURI)?.scheme, !scheme.isEmpty {
-            return scheme
-        }
-        return "app.rork.hiyjy25oz4yjrbssyotkw"
-    }
-}
-
-/// Presents Oura OAuth and resumes the awaiting task exactly once.
-@MainActor
-private final class OuraWebAuthCoordinator: NSObject, ASWebAuthenticationPresentationContextProviding {
-    static let shared = OuraWebAuthCoordinator()
-
-    private var session: ASWebAuthenticationSession?
-    private var pendingContinuation: CheckedContinuation<URL, Error>?
-
-    func start(url: URL, callbackScheme: String) async throws -> URL {
-        guard pendingContinuation == nil, session == nil else {
-            throw OuraAuthError.sessionAlreadyActive
-        }
-        guard !callbackScheme.isEmpty else {
-            throw OuraAuthError.missingCode
-        }
-
-        return try await withCheckedThrowingContinuation { continuation in
-            pendingContinuation = continuation
-
-            let session = ASWebAuthenticationSession(
-                url: url,
-                callbackURLScheme: callbackScheme
-            ) { [weak self] callbackURL, error in
-                Task { @MainActor in
-                    self?.handleCompletion(callbackURL: callbackURL, error: error)
-                }
-            }
-
-            session.prefersEphemeralWebBrowserSession = false
-            session.presentationContextProvider = self
-            self.session = session
-
-            Task { @MainActor in
-                await Task.yield()
-                await self.presentSessionIfNeeded()
-            }
-        }
-    }
-
-    private func presentSessionIfNeeded() async {
-        guard let session else { return }
-        if !session.start() {
-            finish(with: .failure(OuraAuthError.presentationFailed))
-        }
-    }
-
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        AuthPresentationAnchor.keyWindow()
-    }
-
-    private func handleCompletion(callbackURL: URL?, error: Error?) {
-        if let error = error as? ASWebAuthenticationSessionError,
-           error.code == .canceledLogin {
-            finish(with: .failure(OuraAuthError.cancelled))
-            return
-        }
-        if let error {
-            finish(with: .failure(error))
-            return
-        }
-        guard let callbackURL else {
-            finish(with: .failure(OuraAuthError.missingCode))
-            return
-        }
-        finish(with: .success(callbackURL))
-    }
-
-    private func finish(with result: Result<URL, Error>) {
-        guard let continuation = pendingContinuation else { return }
-        pendingContinuation = nil
-        session = nil
-
-        switch result {
-        case .success(let url):
-            continuation.resume(returning: url)
-        case .failure(let error):
-            continuation.resume(throwing: error)
-        }
     }
 }
 

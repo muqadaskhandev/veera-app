@@ -26,9 +26,11 @@ struct SessionDetailCard: View {
     @State private var showProfileNote = false
 
     private var isPersonal: Bool { session.accent == .personal }
-    private var firstName: String { session.clientName.split(separator: " ").first.map(String.init) ?? session.clientName }
+    private var firstName: String {
+        session.clientName.split(separator: " ").first.map(String.init) ?? session.clientName
+    }
     private var reminderText: String {
-        "Hey \(firstName), see you at \(Session.display(session.startMinutes))!"
+        session.clientReminderSMS
     }
 
     var body: some View {

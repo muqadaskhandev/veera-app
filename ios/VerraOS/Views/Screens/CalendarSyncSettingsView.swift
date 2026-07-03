@@ -5,6 +5,7 @@
 
 import EventKit
 import SwiftUI
+import UIKit
 
 /// Connect external (personal) calendars to the app, and choose import/export
 /// directionality. Reached from the drawer's App Settings.
@@ -13,6 +14,7 @@ struct CalendarSyncSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var isConnectingApple = false
+    @State private var isConnectingGoogle = false
     @State private var alertMessage: String?
 
     var body: some View {
@@ -23,7 +25,15 @@ struct CalendarSyncSettingsView: View {
                     statusSummary
                     linkSection
                     directionalitySection(importEvents: $store.importPersonalEvents, exportSessions: $store.exportSessions)
+                    remindersSection(
+                        reminderMinutes: $store.calendarReminderMinutesBefore,
+                        useDedicatedCalendar: $store.useDedicatedVerraCalendar
+                    )
+                    conflictSection(blockConflicts: $store.blockConflictsOnSave)
                     permissionNote
+                    if CalendarSyncService.authorizationStatus == .denied || CalendarSyncService.authorizationStatus == .restricted {
+                        openSettingsButton
+                    }
                     footnote
                 }
                 .padding(.horizontal, Theme.Spacing.md)
@@ -52,9 +62,28 @@ struct CalendarSyncSettingsView: View {
                 store.saveCalendarPrefs()
                 Task { await store.refreshCalendarData() }
             }
-            .onChange(of: store.exportSessions) { _, _ in
+            .onChange(of: store.exportSessions) { _, enabled in
                 store.saveCalendarPrefs()
-                Task { await store.refreshCalendarData() }
+                if enabled {
+                    Task { await store.exportSessionsToExternalCalendars() }
+                }
+            }
+            .onChange(of: store.calendarReminderMinutesBefore) { _, _ in
+                store.saveCalendarPrefs()
+                Task {
+                    await store.exportSessionsToExternalCalendars()
+                    await SessionReminderService.rescheduleAll(for: store.sessions, minutesBefore: store.calendarReminderMinutesBefore)
+                }
+            }
+            .onChange(of: store.blockConflictsOnSave) { _, _ in
+                store.saveCalendarPrefs()
+            }
+            .onChange(of: store.useDedicatedVerraCalendar) { _, _ in
+                store.saveCalendarPrefs()
+                if store.useDedicatedVerraCalendar {
+                    try? CalendarSyncService.ensureVerraCalendar()
+                }
+                Task { await store.exportSessionsToExternalCalendars() }
             }
         }
     }
@@ -93,10 +122,14 @@ struct CalendarSyncSettingsView: View {
 
     private var statusSubtitle: String {
         if store.isSynced {
-            if store.appleLinked { return "Apple Calendar connected." }
-            return "Your calendars are connected."
+            switch (store.googleLinked, store.appleLinked) {
+            case (true, true): return "Google and Apple Calendar connected."
+            case (true, false): return "Google Calendar connected."
+            case (false, true): return "Apple Calendar connected."
+            default: return "Your calendars are connected."
+            }
         }
-        return "Link Apple Calendar to import busy times and export sessions."
+        return "Link Google or Apple Calendar to import busy times and export sessions."
     }
 
     // MARK: Link accounts
@@ -105,7 +138,12 @@ struct CalendarSyncSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionLabel("Link Account")
             VStack(spacing: Theme.Spacing.sm) {
-                GoogleCalendarRow()
+                GoogleCalendarRow(
+                    isLinked: store.googleLinked,
+                    isConnecting: isConnectingGoogle,
+                    onConnect: connectGoogle,
+                    onDisconnect: disconnectGoogle
+                )
                 AppleCalendarRow(
                     isLinked: store.appleLinked,
                     isConnecting: isConnectingApple,
@@ -113,6 +151,23 @@ struct CalendarSyncSettingsView: View {
                     onDisconnect: disconnectApple
                 )
             }
+        }
+    }
+
+    private func connectGoogle() {
+        isConnectingGoogle = true
+        Task {
+            let ok = await store.connectGoogleCalendar()
+            isConnectingGoogle = false
+            if !ok {
+                alertMessage = store.calendarSyncError ?? "Could not connect Google Calendar."
+            }
+        }
+    }
+
+    private func disconnectGoogle() {
+        Task {
+            await store.disconnectGoogleCalendar()
         }
     }
 
@@ -131,6 +186,101 @@ struct CalendarSyncSettingsView: View {
         withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
             store.disconnectAppleCalendar()
         }
+    }
+
+    // MARK: Reminders
+
+    private func remindersSection(reminderMinutes: Binding<Int>, useDedicatedCalendar: Binding<Bool>) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionLabel("Reminders")
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Remind me before sessions")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.Color.ink)
+                        Text("Sets calendar alarms and local push reminders.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.Color.inkMuted)
+                    }
+                    Spacer()
+                    Picker("", selection: reminderMinutes) {
+                        Text("15 min").tag(15)
+                        Text("30 min").tag(30)
+                        Text("1 hour").tag(60)
+                        Text("2 hours").tag(120)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.vertical, 14)
+
+                Rectangle().fill(Theme.Color.hairline).frame(height: 1).padding(.horizontal, Theme.Spacing.md)
+
+                Toggle(isOn: useDedicatedCalendar) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Use Verra Sessions calendar")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.Color.ink)
+                        Text("Exports to a dedicated calendar instead of your default.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.Color.inkMuted)
+                    }
+                }
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.vertical, 14)
+            }
+            .tint(Theme.Color.accent)
+            .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+            .opacity(store.isSynced ? 1 : 0.5)
+            .disabled(!store.isSynced)
+        }
+    }
+
+    // MARK: Conflicts
+
+    private func conflictSection(blockConflicts: Binding<Bool>) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionLabel("Conflicts")
+            Toggle(isOn: blockConflicts) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Block overlapping appointments")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.Color.ink)
+                    Text("Prevent saving when a session overlaps another session or imported personal event.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.Color.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(Theme.Color.accent)
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, 14)
+            .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+        }
+    }
+
+    private var openSettingsButton: some View {
+        Button {
+            if let url = CalendarSyncService.openSettingsURL() {
+                UIApplication.shared.open(url)
+            }
+        } label: {
+            HStack {
+                Image(systemName: "gear")
+                Text("Open iOS Settings")
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(Theme.Color.ink)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Directionality
@@ -204,7 +354,7 @@ struct CalendarSyncSettingsView: View {
     private var applePermissionLabel: String {
         switch CalendarSyncService.authorizationStatus {
         case .fullAccess:
-            return "Full calendar access granted."
+            return "Full calendar access granted. Personal events refresh automatically when your calendar changes."
         case .writeOnly:
             return "Write-only access — enable full access in Settings to import busy blocks."
         case .denied, .restricted:
@@ -217,7 +367,7 @@ struct CalendarSyncSettingsView: View {
     }
 
     private var footnote: some View {
-        Text("Connect Apple Calendar so personal appointments appear as busy blocks and coaching sessions stay in sync. Google Calendar support is coming soon.")
+        Text("Connect Google or Apple Calendar so personal appointments appear as busy blocks and coaching sessions stay in sync with reminders.")
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(Theme.Color.inkFaint)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -235,6 +385,11 @@ struct CalendarSyncSettingsView: View {
 // MARK: - Link rows
 
 private struct GoogleCalendarRow: View {
+    let isLinked: Bool
+    let isConnecting: Bool
+    let onConnect: () -> Void
+    let onDisconnect: () -> Void
+
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
@@ -247,22 +402,33 @@ private struct GoogleCalendarRow: View {
                 Text("Google Calendar")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.Color.ink)
-                Text("Coming soon")
+                Text(isLinked ? "Connected" : "Not connected")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.Color.inkMuted)
+                    .foregroundStyle(isLinked ? Color(hex: 0x57C77B) : Theme.Color.inkMuted)
             }
             Spacer()
-            Text("Soon")
+            Button {
+                if isLinked { onDisconnect() } else { onConnect() }
+            } label: {
+                Group {
+                    if isConnecting {
+                        ProgressView()
+                    } else {
+                        Text(isLinked ? "Disconnect" : "Connect")
+                    }
+                }
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Theme.Color.inkFaint)
+                .foregroundStyle(isLinked ? Theme.Color.inkMuted : Theme.Color.accentInk)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 9)
-                .background(Theme.Color.surfaceMuted, in: Capsule())
+                .background(isLinked ? Theme.Color.surfaceMuted : Theme.Color.accent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(isConnecting)
         }
         .padding(Theme.Spacing.md)
         .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
-        .opacity(0.7)
     }
 }
 

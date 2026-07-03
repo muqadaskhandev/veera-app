@@ -2,6 +2,7 @@ import Fluent
 import Vapor
 
 struct CreateInviteRequest: Content {
+    var trainerID: UUID?
     var expiresInDays: Int?
     var clientEmail: String?
     var clientName: String?
@@ -19,6 +20,7 @@ struct CreateInviteRequest: Content {
 struct InviteCreatedResponse: Content {
     let invite: InviteCodeDTO
     let emailSent: Bool
+    let smsSent: Bool
     let client: ClientDTO?
 }
 

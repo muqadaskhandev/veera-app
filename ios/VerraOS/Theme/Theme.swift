@@ -50,6 +50,12 @@ enum Theme {
         static let lg: CGFloat = 26
         static let pill: CGFloat = 999
     }
+
+    /// Layout helpers for the fixed bottom tab bar.
+    enum Layout {
+        /// Breathing room after the last row in tab-root scroll views.
+        static let scrollBottomPadding: CGFloat = 24
+    }
 }
 
 extension Color {
@@ -67,5 +73,10 @@ extension View {
     func cardShadow(_ strength: Double = 1) -> some View {
         self.shadow(color: Color(hex: 0x1A1A17).opacity(0.05 * strength), radius: 18, x: 0, y: 10)
             .shadow(color: Color(hex: 0x1A1A17).opacity(0.03 * strength), radius: 2, x: 0, y: 1)
+    }
+
+    /// Keeps the last scroll row above the sticky tab bar and home indicator.
+    func tabScrollContent() -> some View {
+        contentMargins(.bottom, Theme.Layout.scrollBottomPadding, for: .scrollContent)
     }
 }

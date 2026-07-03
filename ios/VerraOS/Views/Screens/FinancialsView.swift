@@ -106,8 +106,8 @@ struct FinancialsView: View {
             }
             .padding(.horizontal, Theme.Spacing.md)
             .padding(.top, Theme.Spacing.sm)
-            .padding(.bottom, 110)
         }
+        .tabScrollContent()
         .background(Theme.Color.background)
     }
 

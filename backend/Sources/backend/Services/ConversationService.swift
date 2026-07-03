@@ -56,17 +56,35 @@ enum ConversationService {
             throw Abort(.forbidden)
         }
 
+        guard let client = try await Client.find(clientID, on: database) else {
+            throw Abort(.notFound, reason: "Client not found")
+        }
+
+        if trainerUser.userRole == .admin {
+            if let existing = try await Conversation.query(on: database)
+                .filter(\.$trainer.$id == client.$trainer.id)
+                .filter(\.$client.$id == clientID)
+                .first() {
+                return existing
+            }
+
+            let conversation = Conversation(
+                trainerID: client.$trainer.id,
+                clientID: clientID,
+                clientName: client.name,
+                initials: client.initials
+            )
+            try await conversation.save(on: database)
+            return conversation
+        }
+
         guard let trainer = try await Trainer.query(on: database)
             .filter(\.$user.$id == trainerUser.id!)
             .first() else {
             throw Abort(.notFound, reason: "Trainer profile not found")
         }
 
-        guard let client = try await Client.find(clientID, on: database) else {
-            throw Abort(.notFound, reason: "Client not found")
-        }
-
-        if trainerUser.userRole != .admin, client.$trainer.id != trainer.id {
+        if client.$trainer.id != trainer.id {
             throw Abort(.forbidden)
         }
 

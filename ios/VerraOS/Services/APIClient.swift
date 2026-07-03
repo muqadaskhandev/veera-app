@@ -21,21 +21,14 @@ struct APIClient {
 
     private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let value = try container.decode(String.self)
-            let withFractional = ISO8601DateFormatter()
-            withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = withFractional.date(from: value) { return date }
-            let withoutFractional = ISO8601DateFormatter()
-            withoutFractional.formatOptions = [.withInternetDateTime]
-            if let date = withoutFractional.date(from: value) { return date }
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "Invalid ISO8601 date: \(value)"
-            )
-        }
+        decoder.dateDecodingStrategy = .custom(apiDecodeDate)
         return decoder
+    }()
+
+    private static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .custom(apiEncodeDate)
+        return encoder
     }()
 
     func request<T: Decodable>(
@@ -56,7 +49,7 @@ struct APIClient {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         if let body {
-            request.httpBody = try JSONEncoder().encode(AnyEncodable(body))
+            request.httpBody = try Self.encoder.encode(AnyEncodable(body))
         }
 
         let (data, response): (Data, URLResponse)
@@ -152,6 +145,28 @@ struct APIClient {
         let fallback = String(data: data, encoding: .utf8) ?? "Upload failed"
         throw APIError.server(fallback)
     }
+}
+
+private func apiDecodeDate(from decoder: Decoder) throws -> Date {
+    let container = try decoder.singleValueContainer()
+    let value = try container.decode(String.self)
+    let withFractional = ISO8601DateFormatter()
+    withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = withFractional.date(from: value) { return date }
+    let withoutFractional = ISO8601DateFormatter()
+    withoutFractional.formatOptions = [.withInternetDateTime]
+    if let date = withoutFractional.date(from: value) { return date }
+    throw DecodingError.dataCorruptedError(
+        in: container,
+        debugDescription: "Invalid ISO8601 date: \(value)"
+    )
+}
+
+private func apiEncodeDate(_ date: Date, to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    try container.encode(formatter.string(from: date))
 }
 
 private extension Data {

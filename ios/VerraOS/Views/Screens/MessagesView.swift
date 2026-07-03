@@ -111,8 +111,8 @@ struct MessagesView: View {
             }
             .padding(.horizontal, Theme.Spacing.md)
             .padding(.top, Theme.Spacing.sm)
-            .padding(.bottom, 100)
         }
+        .tabScrollContent()
     }
 
     private var countHeader: some View {

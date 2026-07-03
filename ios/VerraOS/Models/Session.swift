@@ -8,6 +8,7 @@ import SwiftUI
 /// A single coaching session on the trainer's schedule.
 struct Session: Identifiable {
     let id: UUID
+    var clientID: UUID?
     var clientName: String
     var focus: String
     var start: String
@@ -19,6 +20,8 @@ struct Session: Identifiable {
     var dayOfMonth: Int
     /// Minutes since midnight, used to order and lay out the timeline.
     var startMinutes: Int
+    /// Absolute start time used for API sync and Apple Calendar export.
+    var scheduledAt: Date
     /// Session length in minutes.
     var durationMinutes: Int
     /// Free-form notes shown in the detail card.
@@ -31,6 +34,7 @@ struct Session: Identifiable {
 
     init(
         id: UUID = UUID(),
+        clientID: UUID? = nil,
         clientName: String,
         focus: String,
         start: String,
@@ -40,12 +44,14 @@ struct Session: Identifiable {
         initials: String,
         dayOfMonth: Int,
         startMinutes: Int,
+        scheduledAt: Date? = nil,
         durationMinutes: Int = 60,
         notes: String = "",
         isCompleted: Bool = false,
         isSkipped: Bool = false
     ) {
         self.id = id
+        self.clientID = clientID
         self.clientName = clientName
         self.focus = focus
         self.start = start
@@ -55,6 +61,7 @@ struct Session: Identifiable {
         self.initials = initials
         self.dayOfMonth = dayOfMonth
         self.startMinutes = startMinutes
+        self.scheduledAt = scheduledAt ?? Self.scheduledDate(dayOfMonth: dayOfMonth, startMinutes: startMinutes)
         self.durationMinutes = durationMinutes
         self.notes = notes
         self.isCompleted = isCompleted
@@ -135,13 +142,40 @@ extension Session {
         "\(Session.display(startMinutes)) – \(Session.display(startMinutes + durationMinutes))"
     }
 
+    /// Human title for calendar export, e.g. "Consultation with Sarah".
+    var calendarEventTitle: String {
+        "\(focus) with \(clientName)"
+    }
+
+    /// Local / push reminder title.
+    var reminderTitle: String {
+        calendarEventTitle
+    }
+
+    /// Local / push reminder body.
+    var reminderBody: String {
+        let time = Session.display(startMinutes)
+        if location.isEmpty {
+            return "Starts at \(time)"
+        }
+        return "Starts at \(time) · \(location)"
+    }
+
+    /// Trainer → client SMS preview from the session detail card.
+    var clientReminderSMS: String {
+        let first = clientName.split(separator: " ").first.map(String.init) ?? clientName
+        return "Hey \(first), see you for your \(focus.lowercased()) at \(Session.display(startMinutes))!"
+    }
+
     /// Builds a session from editor inputs, deriving display strings.
     static func make(
         id: UUID = UUID(),
+        clientID: UUID? = nil,
         clientName: String,
         initials: String,
         dayOfMonth: Int,
         startMinutes: Int,
+        scheduledAt: Date? = nil,
         durationMinutes: Int,
         accent: SessionTag,
         location: String,
@@ -149,22 +183,39 @@ extension Session {
         isCompleted: Bool = false,
         isSkipped: Bool = false
     ) -> Session {
-        Session(
+        let resolved = scheduledAt ?? Self.scheduledDate(dayOfMonth: dayOfMonth, startMinutes: startMinutes)
+        let calendar = Calendar.current
+        let resolvedDay = calendar.component(.day, from: resolved)
+        let resolvedMinutes = calendar.component(.hour, from: resolved) * 60 + calendar.component(.minute, from: resolved)
+        return Session(
             id: id,
+            clientID: clientID,
             clientName: clientName,
             focus: accent.label,
-            start: clock(startMinutes).time,
-            end: display(startMinutes + durationMinutes),
+            start: clock(resolvedMinutes).time,
+            end: display(resolvedMinutes + durationMinutes),
             location: location,
             accent: accent,
             initials: initials,
-            dayOfMonth: dayOfMonth,
-            startMinutes: startMinutes,
+            dayOfMonth: resolvedDay,
+            startMinutes: resolvedMinutes,
+            scheduledAt: resolved,
             durationMinutes: durationMinutes,
             notes: notes,
             isCompleted: isCompleted,
             isSkipped: isSkipped
         )
+    }
+
+    /// Combines day-of-month and start time in the current month (fallback when no absolute date exists).
+    static func scheduledDate(dayOfMonth: Int, startMinutes: Int, monthAnchor: Date = Date()) -> Date {
+        let calendar = Calendar.current
+        var components = calendar.dateComponents([.year, .month], from: monthAnchor)
+        components.day = dayOfMonth
+        components.hour = startMinutes / 60
+        components.minute = startMinutes % 60
+        components.second = 0
+        return calendar.date(from: components) ?? Date()
     }
 }
 

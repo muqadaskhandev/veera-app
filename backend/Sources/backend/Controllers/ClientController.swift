@@ -95,6 +95,10 @@ struct ClientController: RouteCollection {
         if let primaryGoal = payload.primaryGoal { client.primaryGoal = primaryGoal }
         if let skillLevel = payload.skillLevel { client.skillLevel = skillLevel }
         if let note = payload.note { client.note = note }
+        if let visibleModules = payload.visibleModules {
+            let validated = try ClientVisibleModules.validated(visibleModules)
+            client.visibleModulesJSON = ClientVisibleModules.encode(validated)
+        }
 
         try await client.save(on: req.db)
         return try await ClientDTO.make(from: client, on: req.db)

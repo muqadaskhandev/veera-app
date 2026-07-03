@@ -38,8 +38,18 @@ struct InviteController: RouteCollection {
         let user = try req.auth.require(User.self)
         let payload = try req.content.decode(CreateInviteRequest.self)
 
-        guard let trainer = try await Trainer.query(on: req.db).filter(\.$user.$id == user.id!).first() else {
-            throw Abort(.notFound, reason: "Trainer profile not found")
+        let trainer: Trainer
+        if user.userRole == .admin {
+            guard let trainerID = payload.trainerID,
+                  let resolved = try await Trainer.find(trainerID, on: req.db) else {
+                throw Abort(.badRequest, reason: "trainerID is required for admin invite creation")
+            }
+            trainer = resolved
+        } else {
+            guard let resolved = try await Trainer.query(on: req.db).filter(\.$user.$id == user.id!).first() else {
+                throw Abort(.notFound, reason: "Trainer profile not found")
+            }
+            trainer = resolved
         }
 
         let invite = try await InviteService.createInvite(
@@ -81,6 +91,19 @@ struct InviteController: RouteCollection {
             emailSent = true
         }
 
+        var smsSent = false
+        if let rawPhone = payload.clientPhone?.trimmingCharacters(in: .whitespacesAndNewlines), !rawPhone.isEmpty {
+            ClientInviteSMSService.queueInvite(
+                to: rawPhone,
+                trainerName: trainer.name,
+                clientName: payload.clientName,
+                code: invite.code,
+                userID: savedClient?.$user.id,
+                on: req.application
+            )
+            smsSent = true
+        }
+
         var clientDTO: ClientDTO?
         if let savedClient {
             clientDTO = try ClientDTO(from: savedClient)
@@ -89,6 +112,7 @@ struct InviteController: RouteCollection {
         return InviteCreatedResponse(
             invite: try InviteCodeDTO(from: invite),
             emailSent: emailSent,
+            smsSent: smsSent,
             client: clientDTO
         )
     }

@@ -22,6 +22,12 @@ final class PushDeviceToken: Model, @unchecked Sendable {
     @Timestamp(key: "updated_at", on: .update)
     var updatedAt: Date?
 
+    @OptionalField(key: "invalidated_at")
+    var invalidatedAt: Date?
+
+    @OptionalField(key: "last_error")
+    var lastError: String?
+
     init() {}
 
     init(userID: UUID, token: String, platform: String = "ios") {

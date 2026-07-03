@@ -11,6 +11,7 @@ struct WeightTrackingView: View {
 
     @Environment(ProfileStore.self) private var profile
     @Environment(TrainerStore.self) private var trainer
+    @Environment(ClientStore.self) private var clientStore
     @Environment(\.isReadOnly) private var isReadOnly
 
     @State private var showingLog = false
@@ -56,8 +57,9 @@ struct WeightTrackingView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.sm)
-                .padding(.bottom, 100)
             }
+            .frame(maxHeight: .infinity)
+            .tabScrollContent()
         }
         .background(Theme.Color.background)
         .toast($toast)
@@ -70,6 +72,15 @@ struct WeightTrackingView: View {
         .sheet(isPresented: $editingDetails) {
             WeightDetailsSheet(start: startWeight, current: currentWeight, goal: goalWeight, unit: unit) { newStart, newCurrent, newGoal in
                 profile.setWeightTargets(start: unit.toKg(newStart), goal: unit.toKg(newGoal), for: client)
+                if !isReadOnly {
+                    clientStore.updateBiometrics(
+                        age: client.age,
+                        heightCm: client.heightCm,
+                        weightKg: Int(unit.toKg(newCurrent).rounded()),
+                        goalWeightKg: Int(unit.toKg(newGoal).rounded()),
+                        for: client.id
+                    )
+                }
                 if abs(newCurrent - currentWeight) > 0.001 {
                     profile.logWeight(unit.toKg(newCurrent), for: client)
                 }
