@@ -32,6 +32,18 @@ struct ClientSettingsView: View {
 
                     unitsCard
 
+                    NavigationLink {
+                        ClientNotificationPreferencesView()
+                    } label: {
+                        settingsRow(
+                            icon: "bell.badge.fill",
+                            tint: Color(hex: 0xF2A93C),
+                            title: "Notification Preferences",
+                            subtitle: "Schedule, messages & session alerts"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
                     logOutCard
                         .padding(.top, Theme.Spacing.md)
 
@@ -202,12 +214,50 @@ struct ClientSettingsView: View {
         }
         .confirmationDialog("Delete your account?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete Account", role: .destructive) {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { onDeleteAccount() }
+                Task { await deleteAccount() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This permanently removes your account and data. This can't be undone.")
         }
+    }
+
+    @MainActor
+    private func deleteAccount() async {
+        guard let token = AuthStore.accessToken else { return }
+        do {
+            try await VerraAPI.deleteAccount(accessToken: token)
+            dismiss()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { onDeleteAccount() }
+        } catch {
+            // Account deletion failed — user stays signed in.
+        }
+    }
+
+    private func settingsRow(icon: String, tint: Color, title: String, subtitle: String) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().fill(tint.opacity(0.14)).frame(width: 44, height: 44)
+                Image(systemName: icon)
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.Color.ink)
+                Text(subtitle)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.Color.inkMuted)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.Color.inkFaint)
+        }
+        .padding(Theme.Spacing.md)
+        .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+        .cardShadow()
     }
 }

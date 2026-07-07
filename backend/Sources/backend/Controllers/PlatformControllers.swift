@@ -75,10 +75,11 @@ struct FinancialController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let financials = routes.grouped("api", "financials")
             .grouped(JWTAuthMiddleware())
-            .grouped(RoleGuardMiddleware(.trainer, .admin))
 
-        financials.get(use: summary)
-        financials.post(use: create)
+        let trainerFinancials = financials.grouped(RoleGuardMiddleware(.trainer, .admin))
+        trainerFinancials.get(use: summary)
+        trainerFinancials.post(use: create)
+
         financials.get("clients", ":clientID", use: clientLedger)
     }
 
@@ -93,7 +94,7 @@ struct FinancialController: RouteCollection {
     func create(req: Request) async throws -> FinancialEventDTO {
         let user = try req.auth.require(User.self)
         let payload = try req.content.decode(CreateFinancialEventRequest.self)
-        return try await FinancialService.createEvent(for: user, payload: payload, on: req.db)
+        return try await FinancialService.createEvent(for: user, payload: payload, on: req.db, app: req.application)
     }
 
     @Sendable
@@ -161,7 +162,7 @@ struct ClientProfileController: RouteCollection {
         let user = try req.auth.require(User.self)
         guard let clientID = req.parameters.get("clientID", as: UUID.self) else { throw Abort(.badRequest) }
         let payload = try req.content.decode(LogWeightRequest.self)
-        return try await ClientProfileService.logWeight(clientID: clientID, payload: payload, user: user, on: req.db)
+        return try await ClientProfileService.logWeight(clientID: clientID, payload: payload, user: user, on: req.db, app: req.application)
     }
 
     @Sendable
@@ -392,6 +393,9 @@ struct SubscriptionController: RouteCollection {
     @Sendable
     func current(req: Request) async throws -> SubscriptionDTO {
         let user = try req.auth.require(User.self)
+        guard user.userRole == .trainer || user.userRole == .admin else {
+            throw Abort(.forbidden, reason: "Subscriptions are only available for trainers")
+        }
         guard let subscription = try await SubscriptionService.current(for: user, on: req.db) else {
             throw Abort(.notFound, reason: "No subscription on file")
         }
@@ -401,6 +405,9 @@ struct SubscriptionController: RouteCollection {
     @Sendable
     func validate(req: Request) async throws -> SubscriptionDTO {
         let user = try req.auth.require(User.self)
+        guard user.userRole == .trainer || user.userRole == .admin else {
+            throw Abort(.forbidden, reason: "Subscriptions are only available for trainers")
+        }
         let payload = try req.content.decode(ValidateReceiptRequest.self)
         return try await SubscriptionService.validateReceipt(
             for: user,

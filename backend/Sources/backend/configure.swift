@@ -60,6 +60,8 @@ func configure(_ app: Application) async throws {
     app.migrations.add(AddGoalWeightToClient())
     app.migrations.add(AddVisibleModulesToClient())
     app.migrations.add(CreatePlatformFeatures())
+    app.migrations.add(ExtendPlatformSettings())
+    app.migrations.add(ExtendSubscriptionLifecycle())
     app.migrations.add(AddExerciseLibraryFields())
     app.migrations.add(CreateNotificationOutbox())
     app.migrations.add(CreateGoogleCalendarTables())

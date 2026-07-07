@@ -715,10 +715,25 @@ struct WorkoutPlanView: View {
     private func addCustomExercise(named name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
-        insertItem(WorkoutExercise(name: trimmed), underHeaderID: searchSectionID)
-        exerciseSearch = ""
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { searchSectionID = nil }
-        toast = ToastData(message: "Added \(trimmed)", icon: "checkmark.circle.fill")
+        Task { @MainActor in
+            var exerciseID: UUID?
+            if let token = AuthStore.accessToken,
+               let created = try? await VerraAPI.createExercise(
+                    name: trimmed,
+                    category: "Custom",
+                    description: nil,
+                    accessToken: token
+               ) {
+                exerciseID = created.id
+            }
+            insertItem(
+                WorkoutExercise(exerciseID: exerciseID, name: trimmed, category: "Custom"),
+                underHeaderID: searchSectionID
+            )
+            exerciseSearch = ""
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { searchSectionID = nil }
+            toast = ToastData(message: "Added \(trimmed)", icon: "checkmark.circle.fill")
+        }
     }
 
     private func addRestDay(underHeaderID headerID: UUID) {

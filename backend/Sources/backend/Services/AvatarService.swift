@@ -78,4 +78,31 @@ enum AvatarService {
         }
         return "jpg"
     }
+
+    static func saveSupportAttachment(
+        file: File,
+        for userID: UUID,
+        on app: Application
+    ) async throws -> String {
+        let base = app.directory.workingDirectory + "uploads/support/"
+        try FileManager.default.createDirectory(atPath: base, withIntermediateDirectories: true)
+
+        let data = Data(file.data.readableBytesView)
+        guard !data.isEmpty else {
+            throw Abort(.badRequest, reason: "Attachment file is empty")
+        }
+        guard data.count <= maxBytes else {
+            throw Abort(.badRequest, reason: "Attachment must be 5 MB or smaller")
+        }
+
+        let ext = normalizedExtension(for: file)
+        guard allowedExtensions.contains(ext) else {
+            throw Abort(.badRequest, reason: "Attachment must be JPEG, PNG, or WebP")
+        }
+
+        let filename = "\(userID.uuidString)-\(UUID().uuidString).\(ext == "jpeg" ? "jpg" : ext)"
+        let path = base + filename
+        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        return filename
+    }
 }

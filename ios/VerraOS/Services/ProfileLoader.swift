@@ -41,6 +41,7 @@ struct ProfileClientDTO: Codable {
     let heightCm: Int?
     let weightKg: Int?
     let goalWeightKg: Int?
+    let startWeightKg: Double?
     let injuryHistory: String
     let primaryGoal: String
     let skillLevel: String
@@ -58,9 +59,16 @@ struct LinkedTrainerDTO: Codable {
     let avatarURL: String?
 }
 
+struct ProfileSettingsDTO: Codable {
+    let weightUnit: String
+    let biometricLoginEnabled: Bool
+    let calendarPrefsJSON: String?
+}
+
 struct ProfileResponse: Codable {
     let user: ProfileUserDTO
     let profile: ProfileDetailsDTO
+    let settings: ProfileSettingsDTO
     let trainer: ProfileTrainerDTO?
     let client: ProfileClientDTO?
     let linkedTrainer: LinkedTrainerDTO?
@@ -81,6 +89,9 @@ struct UpdateProfileBody: Encodable {
     var heightCm: Int?
     var weightKg: Int?
     var goalWeightKg: Int?
+    var weightUnit: String?
+    var biometricLoginEnabled: Bool?
+    var calendarPrefsJSON: String?
 }
 
 enum ProfileLoader {
@@ -95,6 +106,9 @@ enum ProfileLoader {
         )
         store.profile.avatarURL = details.avatarURL ?? response.user.avatarURL
         store.profile.avatarData = await downloadAvatar(path: store.profile.avatarURL)
+        store.profile.weightUnit = WeightUnit(rawValue: response.settings.weightUnit) ?? .kg
+        store.profile.biometricLoginEnabled = response.settings.biometricLoginEnabled
+        store.calendarPrefsJSON = response.settings.calendarPrefsJSON
         store.isLoadedFromServer = true
     }
 
@@ -126,6 +140,7 @@ enum ProfileLoader {
             account.coachProfile = TrainerProfile.empty
         }
         account.hasLinkedTrainer = response.linkedTrainer != nil
+        account.weightUnit = response.settings.weightUnit
         account.isLoaded = true
     }
 
@@ -145,6 +160,7 @@ enum ProfileLoader {
             heightCm: dto.heightCm,
             weightKg: dto.weightKg,
             goalWeightKg: dto.goalWeightKg,
+            startWeightKg: dto.startWeightKg,
             injuryHistory: dto.injuryHistory,
             primaryGoal: dto.primaryGoal,
             skillLevel: dto.skillLevel,

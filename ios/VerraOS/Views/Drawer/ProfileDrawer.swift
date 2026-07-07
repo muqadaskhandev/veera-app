@@ -13,10 +13,13 @@ struct ProfileDrawer: View {
     let version: String
     let onClose: () -> Void
     var onEditProfile: () -> Void = {}
+    var onSubscription: () -> Void = {}
     var onAppSettings: () -> Void = {}
     var onLegal: () -> Void = {}
     var onHelp: () -> Void = {}
     var onLogOut: () -> Void = {}
+
+    @Environment(SubscriptionStore.self) private var subscription
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -29,6 +32,12 @@ struct ProfileDrawer: View {
                 VStack(alignment: .leading, spacing: 0) {
                     section(title: "Profile") {
                         DrawerRow(icon: "person", label: "Edit Profile", action: onEditProfile)
+                        DrawerRow(
+                            icon: "creditcard.fill",
+                            label: "Subscription",
+                            trailingCaption: subscription.hasActiveSubscription ? subscription.planLabel : nil,
+                            action: onSubscription
+                        )
                         DrawerRow(icon: "slider.horizontal.3", label: "App Settings", action: onAppSettings)
                     }
                     divider
@@ -88,6 +97,19 @@ struct ProfileDrawer: View {
                 Text(profile.title)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.Color.inkMuted)
+                if subscription.hasActiveSubscription {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("Verra Pro · \(subscription.planLabel)")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundStyle(Theme.Color.accentInk)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Theme.Color.accent, in: Capsule())
+                    .padding(.top, 4)
+                }
             }
 
             Button(action: onEditProfile) {
@@ -155,6 +177,7 @@ private struct DrawerRow: View {
     let icon: String
     let label: String
     var trailing: String? = nil
+    var trailingCaption: String? = nil
     var isDestructive: Bool = false
     var action: () -> Void = {}
 
@@ -173,6 +196,15 @@ private struct DrawerRow: View {
                     .foregroundStyle(isDestructive ? Theme.Color.danger : Theme.Color.ink)
 
                 Spacer(minLength: 0)
+
+                if let trailingCaption {
+                    Text(trailingCaption)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.Color.accentInk)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Theme.Color.accent.opacity(0.2), in: Capsule())
+                }
 
                 if let trailing {
                     Image(systemName: trailing)

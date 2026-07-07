@@ -94,7 +94,8 @@ enum ClientProfileService {
         clientID: UUID,
         payload: LogWeightRequest,
         user: User,
-        on database: any Database
+        on database: any Database,
+        app: Application
     ) async throws -> WeightLogDTO {
         _ = try await ClientAccessService.requireClient(clientID, for: user, on: database)
         let recordedAt = payload.recordedAt ?? Date()
@@ -116,12 +117,15 @@ enum ClientProfileService {
         if user.userRole == .client, let trainerID = try await Client.find(clientID, on: database)?.$trainer.id,
            let trainer = try await Trainer.find(trainerID, on: database),
            let trainerUserID = trainer.$user.id {
-            try await NotificationService.create(
-                userID: trainerUserID,
+            await UserNotificationDeliveryService.deliver(
+                to: trainerUserID,
+                topic: .activity,
                 category: "activity",
                 title: "Weight logged",
                 body: "A client logged a new weight entry.",
-                on: database
+                pushKind: .activityAlert,
+                on: database,
+                app: app
             )
         }
 

@@ -35,6 +35,21 @@ enum MessagePushService {
         on app: Application
     ) async {
         let isOnline = await ChatHub.shared.isUserOnline(userID)
+
+        await UserNotificationDeliveryService.deliver(
+            to: userID,
+            topic: .message,
+            category: "message",
+            title: title,
+            body: body,
+            pushKind: .chatMessage,
+            metadataJSON: encodeConversationMetadata(conversationID),
+            conversationID: conversationID,
+            includePush: !isOnline,
+            on: app.db,
+            app: app
+        )
+
         if isOnline {
             let event = ChatEvent(
                 type: "push.notification",
@@ -42,27 +57,12 @@ enum MessagePushService {
                 preview: body
             )
             await ChatHub.shared.send(to: userID, event: event)
-            return
         }
+    }
 
-        let tokens = (try? await PushTokenService.activeTokens(for: userID, on: app.db)) ?? []
-        guard !tokens.isEmpty else {
-            app.logger.info("Push skipped for user \(userID) — no active device tokens")
-            return
-        }
-
-        for record in tokens {
-            _ = try? await NotificationDeliveryService.sendPushAlert(
-                userID: userID,
-                deviceToken: record.token,
-                title: title,
-                body: body,
-                kind: .chatMessage,
-                conversationID: conversationID,
-                sessionID: nil,
-                on: app.db,
-                app: app
-            )
-        }
+    private static func encodeConversationMetadata(_ conversationID: UUID) -> String? {
+        struct Payload: Codable { let conversationID: UUID }
+        guard let data = try? JSONEncoder().encode(Payload(conversationID: conversationID)) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }

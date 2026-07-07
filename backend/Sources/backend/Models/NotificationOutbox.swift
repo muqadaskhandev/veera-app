@@ -11,6 +11,12 @@ enum NotificationDeliveryKind: String {
     case chatMessage = "chat_message"
     case clientInvite = "client_invite"
     case sessionScheduled = "session_scheduled"
+    case sessionCancelled = "session_cancelled"
+    case subscriptionActivated = "subscription_activated"
+    case subscriptionExpired = "subscription_expired"
+    case subscriptionRenewed = "subscription_renewed"
+    case paymentLogged = "payment_logged"
+    case activityAlert = "activity_alert"
 }
 
 enum NotificationDeliveryStatus: String {

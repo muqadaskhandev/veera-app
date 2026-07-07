@@ -25,6 +25,7 @@ struct ClientDashboardView: View {
     private var unit: WeightUnit { trainer.units }
 
     @State private var path = NavigationPath()
+    @State private var isRefreshing = false
 
     private var client: Client? {
         clientStore.clients.first { $0.id == clientID }
@@ -66,6 +67,28 @@ struct ClientDashboardView: View {
             .padding(.top, Theme.Spacing.sm)
         }
         .tabScrollContent()
+        .opacity(isRefreshing && !account.isLoaded ? 0.6 : 1)
+        .overlay {
+            if isRefreshing && !account.isLoaded {
+                ProgressView()
+            }
+        }
+        .task { await refreshDashboard() }
+        .refreshable { await refreshDashboard() }
+    }
+
+    @MainActor
+    private func refreshDashboard() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        await account.refreshFromServer()
+        if let loaded = account.client {
+            clientStore.clients = [loaded]
+            trainer.profile.weightUnit = WeightUnit(rawValue: account.weightUnit) ?? .kg
+            profile.applyWeightTargets(from: loaded)
+            profile.applyVisibleModules(loaded.visibleModules, for: loaded.id)
+            await profile.refreshAllVisibleModules(for: loaded)
+        }
     }
 
     // MARK: Identity

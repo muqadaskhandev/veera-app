@@ -25,6 +25,15 @@ final class Profile: Model, Content, @unchecked Sendable {
     @OptionalField(key: "avatar_path")
     var avatarPath: String?
 
+    @Field(key: "weight_unit")
+    var weightUnit: String
+
+    @Field(key: "biometric_login_enabled")
+    var biometricLoginEnabled: Bool
+
+    @OptionalField(key: "calendar_prefs_json")
+    var calendarPrefsJSON: String?
+
     @Timestamp(key: "created_at", on: .create)
     var createdAt: Date?
 
@@ -49,6 +58,20 @@ final class Profile: Model, Content, @unchecked Sendable {
         self.bio = bio
         self.specialtiesJSON = specialtiesJSON
         self.avatarPath = avatarPath
+        self.weightUnit = "kg"
+        self.biometricLoginEnabled = false
+    }
+}
+
+struct ProfileSettingsDTO: Content {
+    let weightUnit: String
+    let biometricLoginEnabled: Bool
+    let calendarPrefsJSON: String?
+
+    init(from profile: Profile) {
+        self.weightUnit = profile.weightUnit
+        self.biometricLoginEnabled = profile.biometricLoginEnabled
+        self.calendarPrefsJSON = profile.calendarPrefsJSON
     }
 }
 

@@ -16,9 +16,10 @@ struct SecurityView: View {
     @State private var confirmPassword = ""
     @State private var toast: ToastData?
     @State private var showLogOutConfirm = false
+    @State private var isUpdatingPassword = false
 
     private var canChangePassword: Bool {
-        !currentPassword.isEmpty && newPassword.count >= 6 && newPassword == confirmPassword
+        !currentPassword.isEmpty && newPassword.count >= 8 && newPassword == confirmPassword
     }
 
     var body: some View {
@@ -59,15 +60,14 @@ struct SecurityView: View {
             .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
 
-            if !newPassword.isEmpty && newPassword.count < 6 {
-                helper("New password must be at least 6 characters.", tint: Theme.Color.danger)
+            if !newPassword.isEmpty && newPassword.count < 8 {
+                helper("New password must be at least 8 characters.", tint: Theme.Color.danger)
             } else if !confirmPassword.isEmpty && newPassword != confirmPassword {
                 helper("Passwords don't match.", tint: Theme.Color.danger)
             }
 
             Button {
-                currentPassword = ""; newPassword = ""; confirmPassword = ""
-                toast = ToastData(message: "Password updated", icon: "lock.fill")
+                Task { await updatePassword() }
             } label: {
                 Text("Update Password")
                     .font(.system(size: 16, weight: .bold))
@@ -78,6 +78,26 @@ struct SecurityView: View {
             }
             .buttonStyle(.plain)
             .disabled(!canChangePassword)
+        }
+    }
+
+    @MainActor
+    private func updatePassword() async {
+        guard let token = AuthStore.accessToken else { return }
+        isUpdatingPassword = true
+        defer { isUpdatingPassword = false }
+        do {
+            try await VerraAPI.changePassword(
+                currentPassword: currentPassword,
+                newPassword: newPassword,
+                accessToken: token
+            )
+            currentPassword = ""
+            newPassword = ""
+            confirmPassword = ""
+            toast = ToastData(message: "Password updated", icon: "lock.fill")
+        } catch {
+            toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.circle.fill")
         }
     }
 

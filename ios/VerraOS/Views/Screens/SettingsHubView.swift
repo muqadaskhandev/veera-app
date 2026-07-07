@@ -10,6 +10,7 @@ import SwiftUI
 struct SettingsHubView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(TrainerStore.self) private var trainer
+    @Environment(SubscriptionStore.self) private var subscription
 
     var onLogOut: () -> Void = {}
     var onDeleteAccount: () -> Void = {}
@@ -20,6 +21,18 @@ struct SettingsHubView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: Theme.Spacing.sm) {
+                    NavigationLink {
+                        BillingView(isPaywall: false)
+                    } label: {
+                        SettingsRow(
+                            icon: "creditcard.fill",
+                            tint: Theme.Color.accentInk,
+                            title: "Subscription",
+                            subtitle: subscription.statusSubtitle
+                        )
+                    }
+                    .buttonStyle(.plain)
+
                     NavigationLink {
                         CalendarSyncSettingsView()
                     } label: {
@@ -81,6 +94,10 @@ struct SettingsHubView: View {
                         .foregroundStyle(Theme.Color.ink)
                 }
             }
+        }
+        .task {
+            await subscription.refreshFromServer()
+            await subscription.refreshEntitlements()
         }
     }
 
@@ -147,8 +164,7 @@ struct SettingsHubView: View {
         }
         .confirmationDialog("Delete your account?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete Account", role: .destructive) {
-                dismiss()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { onDeleteAccount() }
+                Task { await deleteAccount() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -200,6 +216,18 @@ struct SettingsHubView: View {
         }
         .padding(3)
         .background(Theme.Color.surfaceMuted, in: Capsule())
+    }
+
+    @MainActor
+    private func deleteAccount() async {
+        guard let token = AuthStore.accessToken else { return }
+        do {
+            try await VerraAPI.deleteAccount(accessToken: token)
+            dismiss()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { onDeleteAccount() }
+        } catch {
+            // Account deletion failed — user stays signed in.
+        }
     }
 }
 

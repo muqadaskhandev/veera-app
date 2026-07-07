@@ -38,17 +38,24 @@ final class NotificationStore {
 
     @MainActor
     func markAllReadOnServer() async {
-        markAllRead()
         guard let token = AuthStore.accessToken else { return }
-        try? await VerraAPI.markAllNotificationsRead(accessToken: token)
+        do {
+            try await VerraAPI.markAllNotificationsRead(accessToken: token)
+            markAllRead()
+        } catch {
+            // Keep local state unchanged if the server call fails.
+        }
     }
 
     private func category(from raw: String) -> NotificationCategory {
         switch raw {
         case "reminder": return .reminder
-        case "schedule", "cancellation": return .cancellation
+        case "schedule": return .reminder
+        case "cancellation": return .cancellation
         case "activity": return .lowBalance
         case "message": return .newMessage
+        case "subscription": return .subscription
+        case "payment": return .paymentLogged
         default: return .paymentLogged
         }
     }
@@ -85,9 +92,14 @@ final class NotificationStore {
     func markRead(_ id: UUID) {
         guard let index = notifications.firstIndex(where: { $0.id == id }) else { return }
         notifications[index].isRead = true
+        Task { @MainActor in
+            guard let token = AuthStore.accessToken else { return }
+            try? await VerraAPI.markNotificationRead(id: id, accessToken: token)
+        }
     }
 
     func dismiss(_ id: UUID) {
+        markRead(id)
         notifications.removeAll { $0.id == id }
     }
 

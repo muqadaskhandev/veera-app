@@ -69,6 +69,7 @@ struct AdminSubscriptionRowDTO: Content {
     let userName: String
     let productID: String
     let status: String
+    let startedAt: Date?
     let expiresAt: Date?
     let isActive: Bool
     let createdAt: Date?
@@ -457,40 +458,7 @@ enum AdminService {
                 throw Abort(.badRequest, reason: "Cannot delete the last admin account")
             }
         }
-
-        let userID = try user.requireID()
-
-        if let trainer = try await Trainer.query(on: database).filter(\.$user.$id == userID).first() {
-            let trainerID = try trainer.requireID()
-            let clients = try await Client.query(on: database).filter(\.$trainer.$id == trainerID).all()
-            for client in clients {
-                try await deleteClientRecords(client, on: database)
-            }
-            try await Conversation.query(on: database).filter(\.$trainer.$id == trainerID).delete()
-            try await FinancialEvent.query(on: database).filter(\.$trainer.$id == trainerID).delete()
-            try await InviteCode.query(on: database).filter(\.$trainer.$id == trainerID).delete()
-            try await trainer.delete(on: database)
-        }
-
-        if let client = try await Client.query(on: database).filter(\.$user.$id == userID).first() {
-            try await deleteClientRecords(client, on: database)
-        }
-
-        try await AuthSession.query(on: database).filter(\.$user.$id == userID).delete()
-        try await EmailVerificationCode.query(on: database).filter(\.$user.$id == userID).delete()
-        try await PasswordResetToken.query(on: database).filter(\.$user.$id == userID).delete()
-        try await PushDeviceToken.query(on: database).filter(\.$user.$id == userID).delete()
-        try await UserNotification.query(on: database).filter(\.$user.$id == userID).delete()
-        try await NotificationPreferences.query(on: database).filter(\.$user.$id == userID).delete()
-        try await WearableConnection.query(on: database).filter(\.$user.$id == userID).delete()
-        try await OuraToken.query(on: database).filter(\.$user.$id == userID).delete()
-        try await OuraOAuthState.query(on: database).filter(\.$user.$id == userID).delete()
-        try await HealthDailyMetric.query(on: database).filter(\.$user.$id == userID).delete()
-        try await TrainerOnboarding.query(on: database).filter(\.$user.$id == userID).delete()
-        try await Profile.query(on: database).filter(\.$user.$id == userID).delete()
-        try await Subscription.query(on: database).filter(\.$user.$id == userID).delete()
-
-        try await user.delete(on: database)
+        try await UserDeletionService.purge(user, on: database)
     }
 
     static func updateSubscription(
@@ -636,16 +604,7 @@ enum AdminService {
     }
 
     private static func deleteClientRecords(_ client: Client, on database: any Database) async throws {
-        let clientID = try client.requireID()
-        try await Session.query(on: database).filter(\.$client.$id == clientID).delete()
-        try await WorkoutWeek.query(on: database).filter(\.$client.$id == clientID).delete()
-        try await WeightLog.query(on: database).filter(\.$client.$id == clientID).delete()
-        try await ProgressPhoto.query(on: database).filter(\.$client.$id == clientID).delete()
-        try await NutritionProfile.query(on: database).filter(\.$client.$id == clientID).delete()
-        try await Conversation.query(on: database).filter(\.$client.$id == clientID).delete()
-        try await FinancialEvent.query(on: database).filter(\.$client.$id == clientID).delete()
-        try await InviteCode.query(on: database).filter(\.$client.$id == clientID).delete()
-        try await client.delete(on: database)
+        try await ClientDeletionService.delete(client, on: database)
     }
 
     private static func validatePassword(_ password: String) throws {
@@ -718,6 +677,7 @@ extension AdminSubscriptionRowDTO {
         self.userName = user.displayName
         self.productID = subscription.productID
         self.status = subscription.status
+        self.startedAt = subscription.startedAt
         self.expiresAt = subscription.expiresAt
         self.isActive = subscription.status == "active" && (subscription.expiresAt.map { $0 > Date() } ?? true)
         self.createdAt = subscription.createdAt

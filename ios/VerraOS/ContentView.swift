@@ -20,10 +20,12 @@ struct ContentView: View {
     @State private var trainer = TrainerStore()
     @State private var healthData = HealthDataStore()
     @State private var showingSettings = false
+    @State private var showingBilling = false
     @State private var showingNotifications = false
     @State private var showingEditProfile = false
     @State private var showingHelp = false
     @State private var showLogOutConfirm = false
+    @Environment(SubscriptionStore.self) private var subscription
 
     /// Public legal page opened from the drawer's Legal row.
     private let legalURL = URL(string: "https://verraos.app/legal")!
@@ -50,6 +52,13 @@ struct ContentView: View {
 
             drawer
         }
+        .overlay {
+            if subscription.needsPaywall {
+                BillingView(isPaywall: true)
+                    .environment(subscription)
+                    .transition(.opacity)
+            }
+        }
         .background(Theme.Color.ink.ignoresSafeArea())
         .environment(app)
         .environment(schedule)
@@ -66,6 +75,25 @@ struct ContentView: View {
             )
             .environment(schedule)
             .environment(trainer)
+            .environment(subscription)
+        }
+        .sheet(isPresented: $showingBilling) {
+            NavigationStack {
+                BillingView(isPaywall: false)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingBilling = false }
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Theme.Color.ink)
+                        }
+                    }
+            }
+            .environment(subscription)
+        }
+        .onChange(of: app.isDrawerOpen) { _, isOpen in
+            if isOpen {
+                Task { await subscription.refreshFromServer() }
+            }
         }
         .sheet(isPresented: $showingNotifications) {
             NotificationCenterView()
@@ -83,11 +111,16 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         }
         .task {
+            await subscription.bootstrap()
+            schedule.onCalendarPrefsPersisted = { json in
+                Task { await trainer.saveCalendarPrefsJSON(json) }
+            }
             profile.onVisibleModulesPersisted = { id, modules in
                 clients.updateVisibleModules(modules, for: id)
                 clients.syncRoster(to: schedule)
             }
             await trainer.refreshFromServer()
+            schedule.loadCalendarPrefsFromServer(trainer.calendarPrefsJSON)
             await clients.refreshFromServer()
             clients.syncRoster(to: schedule)
             profile.applyVisibleModulesFromClients(clients.clients)
@@ -100,7 +133,7 @@ struct ContentView: View {
             }
             if let token = AuthStore.accessToken {
                 await messages.start(accessToken: token)
-                if let summary = try? await VerraAPI.fetchFinancialSummary(filter: "month", accessToken: token) {
+                if let summary = try? await VerraAPI.fetchFinancialSummary(filter: "all", accessToken: token) {
                     PlatformLoader.applyFinancialEvents(summary.events, clients: clients.clients, to: profile)
                 }
             }
@@ -108,6 +141,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openChatConversation)) { notification in
             guard let conversationID = notification.object as? UUID else { return }
             app.openChat(conversationID: conversationID)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshNotifications)) { _ in
+            Task { await notifications.refreshFromServer() }
         }
         .onDisappear {
             messages.stop()
@@ -126,7 +162,6 @@ struct ContentView: View {
                 onMenu: { app.openDrawer() },
                 onBell: {
                     showingNotifications = true
-                    Task { await notifications.markAllReadOnServer() }
                 }
             )
 
@@ -162,6 +197,7 @@ struct ContentView: View {
             version: app.appVersion,
             onClose: { app.closeDrawer() },
             onEditProfile: { presentAfterDrawer { showingEditProfile = true } },
+            onSubscription: { presentAfterDrawer { showingBilling = true } },
             onAppSettings: { presentAfterDrawer { showingSettings = true } },
             onLegal: {
                 app.closeDrawer()
@@ -186,4 +222,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .environment(SubscriptionStore())
 }

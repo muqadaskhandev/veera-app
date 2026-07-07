@@ -16,6 +16,7 @@ struct HelpSupportView: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var attachment: UIImage?
     @State private var toast: ToastData?
+    @State private var isSending = false
 
     private var canSend: Bool {
         !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -193,14 +194,36 @@ struct HelpSupportView: View {
                 .background(canSend ? Theme.Color.accent : Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
         }
         .buttonStyle(.plain)
-        .disabled(!canSend)
+        .disabled(!canSend || isSending)
     }
 
     private func send() {
-        message = ""
-        attachment = nil
-        pickerItem = nil
-        toast = ToastData(message: "Message sent — we'll be in touch", icon: "paperplane.fill")
+        let body = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+        isSending = true
+        Task {
+            defer { isSending = false }
+            guard let token = AuthStore.accessToken else { return }
+            let imageData = attachment?.jpegData(compressionQuality: 0.85)
+            do {
+                try await VerraAPI.submitSupportTicket(
+                    topic: topic.rawValue,
+                    message: body,
+                    attachmentData: imageData,
+                    accessToken: token
+                )
+                await MainActor.run {
+                    message = ""
+                    attachment = nil
+                    pickerItem = nil
+                    toast = ToastData(message: "Message sent — we'll be in touch", icon: "paperplane.fill")
+                }
+            } catch {
+                await MainActor.run {
+                    toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.circle.fill")
+                }
+            }
+        }
     }
 
     private func loadImage(_ item: PhotosPickerItem) async {

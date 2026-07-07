@@ -44,6 +44,7 @@ struct ProfileTrainerDTO: Content {
 struct ProfileResponse: Content {
     let user: ProfileUserDTO
     let profile: ProfileDetailsDTO
+    let settings: ProfileSettingsDTO
     let trainer: ProfileTrainerDTO?
     let client: ClientDTO?
     let linkedTrainer: TrainerDTO?
@@ -64,6 +65,9 @@ struct UpdateProfileRequest: Content {
     var heightCm: Int?
     var weightKg: Int?
     var goalWeightKg: Int?
+    var weightUnit: String?
+    var biometricLoginEnabled: Bool?
+    var calendarPrefsJSON: String?
 }
 
 enum ProfileService {
@@ -114,6 +118,7 @@ enum ProfileService {
             return ProfileResponse(
                 user: ProfileUserDTO(from: user, profile: profile),
                 profile: ProfileDetailsDTO(from: profile),
+                settings: ProfileSettingsDTO(from: profile),
                 trainer: try trainer.map(ProfileTrainerDTO.init),
                 client: nil,
                 linkedTrainer: nil
@@ -135,6 +140,7 @@ enum ProfileService {
             return ProfileResponse(
                 user: ProfileUserDTO(from: user, profile: profile),
                 profile: ProfileDetailsDTO(from: profile),
+                settings: ProfileSettingsDTO(from: profile),
                 trainer: nil,
                 client: clientDTO,
                 linkedTrainer: linkedTrainer
@@ -143,6 +149,7 @@ enum ProfileService {
             return ProfileResponse(
                 user: ProfileUserDTO(from: user, profile: profile),
                 profile: ProfileDetailsDTO(from: profile),
+                settings: ProfileSettingsDTO(from: profile),
                 trainer: nil,
                 client: nil,
                 linkedTrainer: nil
@@ -166,6 +173,19 @@ enum ProfileService {
         if let bio = payload.bio { profile.bio = bio }
         if let specialties = payload.specialties {
             profile.specialtiesJSON = TrainerSpecialties.encode(specialties)
+        }
+        if let weightUnit = payload.weightUnit {
+            let normalized = weightUnit.lowercased()
+            guard normalized == "kg" || normalized == "lbs" else {
+                throw Abort(.badRequest, reason: "Weight unit must be kg or lbs")
+            }
+            profile.weightUnit = normalized
+        }
+        if let biometricLoginEnabled = payload.biometricLoginEnabled {
+            profile.biometricLoginEnabled = biometricLoginEnabled
+        }
+        if let calendarPrefsJSON = payload.calendarPrefsJSON {
+            profile.calendarPrefsJSON = calendarPrefsJSON
         }
 
         try await profile.save(on: database)

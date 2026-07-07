@@ -5,25 +5,21 @@
 
 import SwiftUI
 
-/// Owns the trainer's account profile and all menu preferences, persisting the
-/// whole snapshot to UserDefaults so edits survive app launches.
+/// Owns the trainer's account profile and settings, synced with the backend.
 @Observable
 final class TrainerStore {
-    private static let storageKey = "verra.trainerProfile.v1"
-
     var isLoadedFromServer = false
+    var calendarPrefsJSON: String?
 
     var profile: TrainerProfile {
-        didSet { persist() }
+        didSet { schedulePreferencesSave() }
     }
 
+    private var preferencesSaveTask: Task<Void, Never>?
+    private var isApplyingServerState = false
+
     init() {
-        if let data = UserDefaults.standard.data(forKey: Self.storageKey),
-           let decoded = try? JSONDecoder().decode(TrainerProfile.self, from: data) {
-            profile = decoded
-        } else {
-            profile = .empty
-        }
+        profile = .empty
     }
 
     @MainActor
@@ -32,8 +28,11 @@ final class TrainerStore {
         do {
             let response = try await VerraAPI.fetchProfile(accessToken: token)
             await ProfileLoader.applyTrainer(response, to: self)
+            if let prefs = try? await VerraAPI.fetchNotificationPreferences(accessToken: token) {
+                applyNotificationPreferences(prefs)
+            }
         } catch {
-            // Keep cached profile when offline.
+            // Keep in-memory profile when offline.
         }
     }
 
@@ -60,21 +59,78 @@ final class TrainerStore {
                 name: profile.name,
                 title: profile.title,
                 bio: profile.bio,
-                specialties: profile.specialties.map(\.rawValue).sorted()
+                specialties: profile.specialties.map(\.rawValue).sorted(),
+                weightUnit: profile.weightUnit?.rawValue,
+                biometricLoginEnabled: profile.biometricLoginEnabled,
+                calendarPrefsJSON: nil
             )
         )
         await ProfileLoader.applyTrainer(response, to: self)
+        await savePreferencesToServer()
     }
 
-    private func persist() {
-        guard let data = try? JSONEncoder().encode(profile) else { return }
-        UserDefaults.standard.set(data, forKey: Self.storageKey)
+    @MainActor
+    func saveCalendarPrefsJSON(_ json: String) async {
+        guard let token = AuthStore.accessToken else { return }
+        _ = try? await VerraAPI.updateProfile(
+            accessToken: token,
+            body: UpdateProfileBody(calendarPrefsJSON: json)
+        )
+    }
+
+    @MainActor
+    func savePreferencesToServer() async {
+        guard let token = AuthStore.accessToken else { return }
+        _ = try? await VerraAPI.updateNotificationPreferences(
+            VerraAPI.UpdateNotificationPreferencesBody(
+                notificationsEnabled: profile.notificationsEnabled,
+                notifyMoney: profile.notifyMoney,
+                notifySchedule: profile.notifySchedule,
+                notifyMessages: true,
+                notifyActivity: profile.notifyActivity,
+                activityMode: profile.activityMode.rawValue,
+                quietHoursEnabled: profile.quietHoursEnabled,
+                quietStartMinutes: profile.quietStartMinutes,
+                quietEndMinutes: profile.quietEndMinutes,
+                smsEnabled: nil,
+                reminderMinutesBefore: nil
+            ),
+            accessToken: token
+        )
+        _ = try? await VerraAPI.updateProfile(
+            accessToken: token,
+            body: UpdateProfileBody(
+                weightUnit: profile.weightUnit?.rawValue,
+                biometricLoginEnabled: profile.biometricLoginEnabled
+            )
+        )
+    }
+
+    private func schedulePreferencesSave() {
+        guard !isApplyingServerState else { return }
+        preferencesSaveTask?.cancel()
+        preferencesSaveTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+            await savePreferencesToServer()
+        }
+    }
+
+    func applyNotificationPreferences(_ prefs: VerraAPI.NotificationPreferencesDTO) {
+        isApplyingServerState = true
+        profile.notificationsEnabled = prefs.notificationsEnabled
+        profile.notifyMoney = prefs.notifyMoney
+        profile.notifySchedule = prefs.notifySchedule
+        profile.notifyActivity = prefs.notifyActivity
+        profile.activityMode = ActivityAlertMode(rawValue: prefs.activityMode) ?? .personalBests
+        profile.quietHoursEnabled = prefs.quietHoursEnabled
+        profile.quietStartMinutes = prefs.quietStartMinutes
+        profile.quietEndMinutes = prefs.quietEndMinutes
+        isApplyingServerState = false
     }
 
     // MARK: Convenience
 
-    /// The trainer's chosen weight unit, defaulting to kilograms. Persists via the
-    /// profile's `didSet`.
     var units: WeightUnit {
         get { profile.weightUnit ?? .kg }
         set { profile.weightUnit = newValue }

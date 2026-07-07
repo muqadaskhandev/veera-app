@@ -95,12 +95,17 @@ enum SessionReminderScheduler {
             try? await reminder.save(on: database)
 
             if let userID = reminder.user.id {
-                try? await NotificationService.create(
-                    userID: userID,
+                await UserNotificationDeliveryService.deliver(
+                    to: userID,
+                    topic: .schedule,
                     category: "reminder",
                     title: title,
                     body: body,
-                    on: database
+                    pushKind: .sessionReminder,
+                    sessionID: session.id,
+                    includePush: false,
+                    on: database,
+                    app: app
                 )
             }
         }
@@ -169,6 +174,7 @@ struct ReminderPollingService: LifecycleHandler {
         application.eventLoopGroup.next().scheduleRepeatedTask(initialDelay: .seconds(15), delay: .seconds(60)) { _ in
             Task {
                 await SessionReminderScheduler.processDueReminders(on: application.db, app: application)
+                await SubscriptionExpiryScheduler.processExpiredSubscriptions(on: application.db, app: application)
                 await NotificationDeliveryService.processRetries(on: application.db, app: application)
             }
         }

@@ -115,10 +115,6 @@ final class ProfileStore {
         weightTargetStore[client.id] ?? WeightTargets(start: nil, goal: nil)
     }
 
-    func setWeightTargets(start: Double?, goal: Double?, for client: Client) {
-        weightTargetStore[client.id] = WeightTargets(start: start, goal: goal)
-    }
-
     // MARK: Workout (multi-week)
 
     private func workoutKey(_ id: UUID, _ week: Int) -> String { "\(id.uuidString)#\(week)" }
@@ -299,11 +295,14 @@ final class ProfileStore {
 
     func applyWeightTargets(from client: Client) {
         var targets = weightTargetStore[client.id] ?? WeightTargets(start: nil, goal: nil)
-        if targets.start == nil {
-            targets.start = client.weightKg.map(Double.init)
-        }
+        targets.start = client.startWeightKg ?? client.weightKg.map(Double.init)
         targets.goal = client.goalWeightKg.map(Double.init)
         weightTargetStore[client.id] = targets
+    }
+
+    func setWeightTargets(start: Double?, goal: Double?, for client: Client) {
+        weightTargetStore[client.id] = WeightTargets(start: start, goal: goal)
+        scheduleWeightTargetPersist(start: start, goal: goal, for: client)
     }
 
     // MARK: Ledger
@@ -340,6 +339,17 @@ final class ProfileStore {
 
 extension ProfileStore {
     @MainActor
+    func refreshAllVisibleModules(for client: Client) async {
+        let modules = orderedVisibleModules(for: client.id)
+        for module in modules where module != .wearables {
+            await refreshModule(module, for: client)
+        }
+        if modules.contains(.workout) {
+            await refreshModule(.workout, for: client, week: 0)
+        }
+    }
+
+    @MainActor
     func refreshModule(_ module: ProfileModule, for client: Client, week: Int = 0) async {
         guard let token = AuthStore.accessToken else { return }
         switch module {
@@ -364,6 +374,8 @@ extension ProfileStore {
             if let photos = try? await VerraAPI.fetchProgressPhotos(clientID: client.id, accessToken: token) {
                 PlatformLoader.applyPhotos(photos, clientID: client.id, to: self)
             }
+        case .financials:
+            await refreshLedger(for: client.id)
         default:
             break
         }
@@ -424,6 +436,44 @@ extension ProfileStore {
             if let logs = try? await VerraAPI.fetchWeightLogs(clientID: client.id, accessToken: token) {
                 PlatformLoader.applyWeightLogs(logs, for: client.id, to: self)
             }
+        }
+    }
+
+    func scheduleWeightTargetPersist(start: Double?, goal: Double?, for client: Client) {
+        weightPersistTasks[client.id]?.cancel()
+        weightPersistTasks[client.id] = Task { @MainActor in
+            guard let token = AuthStore.accessToken else { return }
+            let goalKg = goal.map { Int($0.rounded()) }
+            _ = try? await VerraAPI.updateClient(
+                id: client.id,
+                goalWeightKg: goalKg,
+                startWeightKg: start,
+                accessToken: token
+            )
+        }
+    }
+
+    @MainActor
+    func refreshLedger(for clientID: UUID) async {
+        guard let token = AuthStore.accessToken else { return }
+        if let events = try? await VerraAPI.fetchClientLedger(clientID: clientID, accessToken: token) {
+            let entries = events.map { event -> LedgerEntry in
+                let kind: LedgerKind
+                switch event.kind {
+                case "income": kind = .packageAdded
+                case "usage": kind = .sessionUsed
+                default: kind = .adjustment
+                }
+                return LedgerEntry(
+                    id: event.id,
+                    date: event.occurredAt,
+                    title: event.title,
+                    delta: event.sessionDelta,
+                    amount: event.amount,
+                    kind: kind
+                )
+            }
+            replaceLedger(entries, for: clientID)
         }
     }
 

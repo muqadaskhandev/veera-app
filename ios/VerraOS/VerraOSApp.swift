@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        ChatNotificationRouter.handleForeground(userInfo: notification.request.content.userInfo)
         completionHandler([.banner, .sound, .badge])
     }
 

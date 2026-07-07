@@ -107,6 +107,80 @@ enum EmailTemplateService {
         return (subject, text, html)
     }
 
+    static func subscriptionActivatedEmail(
+        displayName: String,
+        planName: String,
+        expiresAt: Date?
+    ) -> (subject: String, text: String, html: String) {
+        let firstName = displayName.split(separator: " ").first.map(String.init) ?? displayName
+        let renewalLine = expiresAt.map { "Your subscription renews on \(formatDate($0))." }
+            ?? "Your subscription will renew automatically unless cancelled in your Apple ID settings."
+
+        let subject = "Your Verra Pro subscription is active"
+        let text = """
+        Hi \(firstName),
+
+        Your Verra Pro \(planName) subscription is now active.
+
+        You can manage clients, schedule sessions, and run your coaching business from Verra.
+
+        \(renewalLine)
+
+        Open Verra to get started.
+        \(appURL)
+        """
+        let html = layout(
+            preview: "Your Verra Pro subscription is active",
+            eyebrow: "Verra Pro",
+            title: "Subscription activated",
+            body: """
+            \(paragraph("Hi \(escape(firstName)), your <strong>\(escape(planName))</strong> subscription is now active."))
+            \(accentCard("""
+            <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:\(Brand.accentInk);text-transform:uppercase;letter-spacing:0.08em;">You're all set</p>
+            <p style="margin:0;font-size:15px;line-height:1.6;color:\(Brand.accentInk);">Manage clients, schedule sessions, and run your coaching business from one place.</p>
+            """))
+            \(infoCard(label: "Plan", value: planName, highlight: true))
+            \(paragraph(escape(renewalLine)))
+            \(button("Open Verra", url: appURL))
+            \(muted("Payment is charged to your Apple ID. Subscriptions auto-renew unless cancelled at least 24 hours before the end of the current period."))
+            """
+        )
+        return (subject, text, html)
+    }
+
+    static func subscriptionExpiredEmail(
+        displayName: String,
+        planName: String,
+        expiredAt: Date?
+    ) -> (subject: String, text: String, html: String) {
+        let firstName = displayName.split(separator: " ").first.map(String.init) ?? displayName
+        let expiredLine = expiredAt.map { "Your \(planName) plan expired on \(formatDate($0))." }
+            ?? "Your \(planName) plan has expired."
+
+        let subject = "Your Verra Pro subscription has expired"
+        let text = """
+        Hi \(firstName),
+
+        \(expiredLine)
+
+        Resubscribe in Verra to keep managing clients, scheduling sessions, and running your coaching business.
+
+        \(appURL)
+        """
+        let html = layout(
+            preview: "Your Verra Pro subscription has expired",
+            eyebrow: "Verra Pro",
+            title: "Subscription expired",
+            body: """
+            \(paragraph("Hi \(escape(firstName)), \(escape(expiredLine))"))
+            \(paragraph("Resubscribe in Verra to keep managing clients, scheduling sessions, and running your coaching business."))
+            \(button("Resubscribe in Verra", url: appURL))
+            \(muted("You can also manage billing from Settings → Apple ID → Subscriptions on your device."))
+            """
+        )
+        return (subject, text, html)
+    }
+
     static func welcomeEmail(displayName: String, role: UserRole) -> (subject: String, text: String, html: String) {
         let firstName = displayName.split(separator: " ").first.map(String.init) ?? displayName
         let (headline, detail) = welcomeCopy(for: role)

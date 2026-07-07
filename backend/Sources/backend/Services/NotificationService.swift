@@ -28,6 +28,16 @@ enum NotificationService {
         if let reminderMinutesBefore = payload.reminderMinutesBefore {
             prefs.reminderMinutesBefore = max(5, min(reminderMinutesBefore, 24 * 60))
         }
+        if let notificationsEnabled = payload.notificationsEnabled { prefs.notificationsEnabled = notificationsEnabled }
+        if let notifyMoney = payload.notifyMoney { prefs.notifyMoney = notifyMoney }
+        if let activityMode = payload.activityMode { prefs.activityMode = activityMode }
+        if let quietHoursEnabled = payload.quietHoursEnabled { prefs.quietHoursEnabled = quietHoursEnabled }
+        if let quietStartMinutes = payload.quietStartMinutes {
+            prefs.quietStartMinutes = max(0, min(quietStartMinutes, 24 * 60 - 1))
+        }
+        if let quietEndMinutes = payload.quietEndMinutes {
+            prefs.quietEndMinutes = max(0, min(quietEndMinutes, 24 * 60 - 1))
+        }
         try await prefs.save(on: database)
         return NotificationPreferencesDTO(from: prefs)
     }

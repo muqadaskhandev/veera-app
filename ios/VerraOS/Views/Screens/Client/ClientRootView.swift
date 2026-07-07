@@ -2,11 +2,8 @@
 //  ClientRootView.swift
 //  VerraOS
 //
-//  The client experience shell: four tabs (Dashboard, Schedule, Wearables,
-//  Messages) on the shared VerraOS theme, running on isolated local demo data
-//  for a single client, plus a slide-in account drawer. Everything is read-only
-//  except logging weight, editing personal goals, messaging, managing their own
-//  wearables, and skipping / cancelling their own sessions.
+//  The client experience shell: dashboard, schedule, wearables, and messages
+//  on the shared VerraOS theme, backed by the authenticated client profile.
 //
 
 import SwiftUI
@@ -47,8 +44,7 @@ enum ClientTab: Int, CaseIterable, Identifiable {
         }
     }
 
-    /// Tabs shown in the bottom navigation bar. Wearables is intentionally
-    /// excluded — it stays reachable from the sidebar menu.
+    /// Tabs shown in the bottom navigation bar. Wearables stays in the drawer.
     static var barTabs: [ClientTab] { [.dashboard, .schedule, .messages] }
 }
 
@@ -61,6 +57,7 @@ struct ClientRootView: View {
     @State private var clients: ClientStore
     @State private var profile: ProfileStore
     @State private var messages: MessageStore
+    @State private var notifications = NotificationStore()
     @State private var trainer = TrainerStore()
     @State private var account = ClientAccountStore()
     @State private var wearables = WearableConnectionStore()
@@ -73,6 +70,7 @@ struct ClientRootView: View {
     @State private var showingHelp = false
     @State private var showingSettings = false
     @State private var showingRedeemInvite = false
+    @State private var showingNotifications = false
     @State private var showLogOutConfirm = false
 
     private var client: Client {
@@ -143,6 +141,7 @@ struct ClientRootView: View {
         .environment(clients)
         .environment(profile)
         .environment(messages)
+        .environment(notifications)
         .environment(trainer)
         .environment(wearables)
         .environment(healthData)
@@ -156,7 +155,7 @@ struct ClientRootView: View {
         }
         .onChange(of: showingEditDetails) { _, isShowing in
             if !isShowing {
-                syncFromAccount()
+                Task { await refreshAll() }
             }
         }
         .sheet(isPresented: $showingHelp) {
@@ -168,34 +167,25 @@ struct ClientRootView: View {
                 onSelectUnit: { trainer.units = $0 },
                 onLogOut: onLogOut,
                 onDeleteAccount: onLogOut,
-                onTrainerLinked: syncFromAccount
+                onTrainerLinked: { Task { await refreshAll() } }
             )
             .environment(account)
         }
         .sheet(isPresented: $showingRedeemInvite) {
             ClientRedeemInviteSheet(account: account) {
-                syncFromAccount()
+                Task { await refreshAll() }
             }
+        }
+        .sheet(isPresented: $showingNotifications) {
+            NotificationCenterView()
+                .environment(notifications)
         }
         .confirmationDialog("Log out of VerraOS?", isPresented: $showLogOutConfirm, titleVisibility: .visible) {
             Button("Log Out", role: .destructive) { onLogOut() }
             Button("Cancel", role: .cancel) {}
         }
         .task {
-            await account.refreshFromServer()
-            syncFromAccount()
-            await schedule.refreshFromServer()
-            await wearables.refreshFromServer()
-            if let clientID = account.client?.id {
-                await healthData.refreshForClient(clientID: clientID, trainerView: false)
-            }
-            await HealthBackgroundSync.syncOnLaunchIfNeeded(wearables: wearables, healthData: healthData)
-            if let token = AuthStore.accessToken {
-                await messages.start(accessToken: token)
-                if let id = await messages.ensureClientThread() {
-                    conversationID = id
-                }
-            }
+            await refreshAll()
         }
         .onDisappear {
             messages.stop()
@@ -211,6 +201,13 @@ struct ClientRootView: View {
             conversationID = id
             withAnimation(.easeInOut(duration: 0.2)) { tab = .messages }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openScheduleTab)) { _ in
+            withAnimation(.easeInOut(duration: 0.2)) { tab = .schedule }
+            Task { await schedule.refreshFromServer() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshNotifications)) { _ in
+            Task { await notifications.refreshFromServer() }
+        }
     }
 
     @MainActor
@@ -219,8 +216,32 @@ struct ClientRootView: View {
         clients.clients = [loaded]
         schedule.clients = [loaded]
         trainer.profile = account.coachProfile
+        trainer.profile.weightUnit = WeightUnit(rawValue: account.weightUnit) ?? .kg
         profile.applyWeightTargets(from: loaded)
         profile.applyVisibleModules(loaded.visibleModules, for: loaded.id)
+    }
+
+    @MainActor
+    private func refreshAll() async {
+        await account.refreshFromServer()
+        syncFromAccount()
+        await schedule.refreshFromServer()
+        await wearables.refreshFromServer()
+        if let client = account.client {
+            await profile.refreshAllVisibleModules(for: client)
+        }
+        if let clientID = account.client?.id {
+            await healthData.refreshForClient(clientID: clientID, trainerView: false)
+        }
+        await HealthBackgroundSync.syncOnLaunchIfNeeded(wearables: wearables, healthData: healthData)
+        if let token = AuthStore.accessToken {
+            await messages.start(accessToken: token)
+            await notifications.refreshFromServer()
+            await ChatPushService.registerIfNeeded()
+            if let id = await messages.ensureClientThread() {
+                conversationID = id
+            }
+        }
     }
 
     // MARK: Shell
@@ -230,7 +251,9 @@ struct ClientRootView: View {
             if tab != .messages {
                 ClientTopBar(
                     title: tab.title,
-                    onMenu: openDrawer
+                    hasUnread: notifications.hasUnread,
+                    onMenu: openDrawer,
+                    onBell: { showingNotifications = true }
                 )
             }
 
@@ -260,7 +283,10 @@ struct ClientRootView: View {
             .transition(.opacity)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if tab != .messages {
-                    ClientTabBar(selected: tab, messagesUnreadCount: messages.unreadCount) { newTab in
+                    ClientTabBar(
+                        selected: tab,
+                        messagesUnreadCount: messages.unreadCount
+                    ) { newTab in
                         guard newTab != tab else { return }
                         withAnimation(.easeInOut(duration: 0.2)) { tab = newTab }
                     }
@@ -327,7 +353,9 @@ struct ClientRootView: View {
 
 private struct ClientTopBar: View {
     let title: String
+    var hasUnread: Bool = false
     let onMenu: () -> Void
+    var onBell: (() -> Void)?
 
     var body: some View {
         HStack(spacing: Theme.Spacing.md) {
@@ -352,8 +380,29 @@ private struct ClientTopBar: View {
 
             Spacer(minLength: 0)
 
-            // Balances the leading menu button so the title stays centered.
-            Color.clear.frame(width: 44, height: 44)
+            if let onBell {
+                Button(action: onBell) {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "bell")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Theme.Color.ink)
+                            .frame(width: 44, height: 44)
+                            .background(Theme.Color.surface, in: Circle())
+                            .overlay(Circle().stroke(Theme.Color.hairline, lineWidth: 1))
+                        if hasUnread {
+                            Circle()
+                                .fill(Theme.Color.danger)
+                                .frame(width: 9, height: 9)
+                                .overlay(Circle().stroke(Theme.Color.background, lineWidth: 2))
+                                .offset(x: 4, y: -4)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Notifications")
+            } else {
+                Color.clear.frame(width: 44, height: 44)
+            }
         }
         .padding(.horizontal, Theme.Spacing.md)
         .padding(.vertical, 10)

@@ -77,6 +77,46 @@ struct APIClient {
         throw APIError.server(fallback)
     }
 
+    func requestVoid(
+        _ path: String,
+        method: String = "GET",
+        body: (any Encodable)? = nil,
+        token: String? = nil
+    ) async throws {
+        guard let url = URL(string: path, relativeTo: APIConfig.baseURL) else {
+            throw APIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if let body {
+            request.httpBody = try Self.encoder.encode(AnyEncodable(body))
+        }
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw mapTransportError(error)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+
+        guard (200..<300).contains(http.statusCode) else {
+            if let apiError = try? Self.decoder.decode(APIErrorResponse.self, from: data) {
+                throw APIError.server(apiError.reason)
+            }
+            let fallback = String(data: data, encoding: .utf8) ?? "Request failed"
+            throw APIError.server(fallback)
+        }
+    }
+
     private func mapTransportError(_ error: Error) -> Error {
         if let urlError = error as? URLError {
             switch urlError.code {
@@ -144,6 +184,55 @@ struct APIClient {
         }
         let fallback = String(data: data, encoding: .utf8) ?? "Upload failed"
         throw APIError.server(fallback)
+    }
+
+    func uploadMultipart<T: Decodable>(
+        path: String,
+        fields: [String: String],
+        fileField: String?,
+        fileData: Data?,
+        filename: String,
+        mimeType: String,
+        token: String
+    ) async throws -> T {
+        guard let url = URL(string: path, relativeTo: APIConfig.baseURL) else {
+            throw APIError.invalidURL
+        }
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        for (key, value) in fields {
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n")
+            body.append("\(value)\r\n")
+        }
+        if let fileField, let fileData {
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(filename)\"\r\n")
+            body.append("Content-Type: \(mimeType)\r\n\r\n")
+            body.append(fileData)
+            body.append("\r\n")
+        }
+        body.append("--\(boundary)--\r\n")
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        if (200..<300).contains(http.statusCode) {
+            return try Self.decoder.decode(T.self, from: data)
+        }
+        if let apiError = try? Self.decoder.decode(APIErrorResponse.self, from: data) {
+            throw APIError.server(apiError.reason)
+        }
+        throw APIError.server(String(data: data, encoding: .utf8) ?? "Upload failed")
     }
 }
 

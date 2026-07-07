@@ -287,7 +287,9 @@ private struct ClientRow: View {
                         .foregroundStyle(Theme.Color.ink)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("\(client.sessionsRemaining) sessions left")
+                    Text(client.sessionsRemaining == 1
+                         ? "1 prepaid session left"
+                         : "\(client.sessionsRemaining) prepaid sessions left")
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(Theme.Color.inkMuted)
                         .lineLimit(1)

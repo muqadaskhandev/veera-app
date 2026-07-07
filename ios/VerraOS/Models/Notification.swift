@@ -12,6 +12,7 @@ enum NotificationCategory {
     case lowBalance
     case paymentLogged
     case newMessage
+    case subscription
 
     var symbol: String {
         switch self {
@@ -20,6 +21,7 @@ enum NotificationCategory {
         case .lowBalance: return "wallet.bifold"
         case .paymentLogged: return "checkmark.seal.fill"
         case .newMessage: return "bubble.left.fill"
+        case .subscription: return "creditcard.fill"
         }
     }
 
@@ -30,6 +32,7 @@ enum NotificationCategory {
         case .lowBalance: return Color(hex: 0xE8923D)
         case .paymentLogged: return Color(hex: 0x4FA85C)
         case .newMessage: return Color(hex: 0x3D7FE8)
+        case .subscription: return Color(hex: 0x57C77B)
         }
     }
 

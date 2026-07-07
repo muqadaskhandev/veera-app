@@ -10,6 +10,7 @@ final class ClientAccountStore {
     var client: Client?
     var coachProfile = TrainerProfile.empty
     var hasLinkedTrainer = false
+    var weightUnit = "kg"
     var isLoaded = false
     var isSaving = false
 

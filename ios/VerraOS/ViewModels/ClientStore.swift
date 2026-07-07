@@ -28,7 +28,9 @@ final class ClientStore {
     func refreshFromServer() async {
         guard let token = AuthStore.accessToken else { return }
         do {
-            let dtos = try await VerraAPI.fetchClients(accessToken: token)
+            async let active = VerraAPI.fetchClients(accessToken: token, archived: false)
+            async let archived = VerraAPI.fetchClients(accessToken: token, archived: true)
+            let dtos = try await active + archived
             clients = dtos.map(ClientLoader.client(from:))
             isLoadedFromServer = true
         } catch {
@@ -41,7 +43,6 @@ final class ClientStore {
         clients[index].visibleModules = modules
     }
 
-    /// Active (non-archived) clients only.
     var activeClients: [Client] {
         clients.filter { !$0.isArchived }
     }
@@ -54,27 +55,25 @@ final class ClientStore {
         schedule.clients = activeClients
     }
 
-    /// Filtered + sorted roster for the directory.
     func roster(search: String, sort: ClientSort, showArchived: Bool) -> [Client] {
         var result = showArchived ? clients.filter { $0.isArchived } : activeClients
 
-        let query = search.trimmingCharacters(in: .whitespaces)
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if !query.isEmpty {
-            result = result.filter { $0.name.localizedCaseInsensitiveContains(query) }
+            result = result.filter {
+                $0.name.lowercased().contains(query)
+                    || $0.email.lowercased().contains(query)
+                    || $0.phone.contains(query)
+            }
         }
 
         switch sort {
+        case .status:
+            result.sort { $0.effectiveStatus.priority > $1.effectiveStatus.priority }
         case .name:
             result.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         case .sessions:
-            result.sort { $0.sessionsRemaining < $1.sessionsRemaining }
-        case .status:
-            result.sort {
-                if $0.effectiveStatus.priority != $1.effectiveStatus.priority {
-                    return $0.effectiveStatus.priority > $1.effectiveStatus.priority
-                }
-                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
+            result.sort { $0.sessionsRemaining > $1.sessionsRemaining }
         }
         return result
     }
@@ -88,6 +87,9 @@ final class ClientStore {
     func archive(_ client: Client) {
         guard let index = clients.firstIndex(where: { $0.id == client.id }) else { return }
         clients[index].isArchived = true
+        Task { @MainActor in
+            await persistArchive(true, for: client.id)
+        }
     }
 
     func restore(_ client: Client) {
@@ -96,10 +98,17 @@ final class ClientStore {
         if clients[index].status == .archived {
             clients[index].status = .active
         }
+        Task { @MainActor in
+            await persistArchive(false, for: client.id)
+        }
     }
 
     func delete(_ client: Client) {
         clients.removeAll { $0.id == client.id }
+        Task { @MainActor in
+            guard let token = AuthStore.accessToken else { return }
+            try? await VerraAPI.deleteClient(id: client.id, accessToken: token)
+        }
     }
 
     func setNote(_ note: String, for client: Client) {
@@ -119,12 +128,12 @@ final class ClientStore {
         }
     }
 
-    /// Updates a client's editable biometric fields. `nil` clears a field.
     func updateBiometrics(
         age: Int?,
         heightCm: Int?,
         weightKg: Int?,
         goalWeightKg: Int? = nil,
+        startWeightKg: Double? = nil,
         for id: UUID
     ) {
         guard let index = clients.firstIndex(where: { $0.id == id }) else { return }
@@ -132,6 +141,7 @@ final class ClientStore {
         clients[index].heightCm = heightCm
         clients[index].weightKg = weightKg
         if let goalWeightKg { clients[index].goalWeightKg = goalWeightKg }
+        if let startWeightKg { clients[index].startWeightKg = startWeightKg }
         Task { @MainActor in
             guard let token = AuthStore.accessToken else { return }
             if let dto = try? await VerraAPI.updateClient(
@@ -140,6 +150,7 @@ final class ClientStore {
                 heightCm: heightCm,
                 weightKg: weightKg,
                 goalWeightKg: goalWeightKg,
+                startWeightKg: startWeightKg,
                 accessToken: token
             ) {
                 if let refreshed = clients.firstIndex(where: { $0.id == id }) {
@@ -149,24 +160,28 @@ final class ClientStore {
         }
     }
 
-    /// Deducts one session from the first client matching this name, clamped at
-    /// zero. Used when a past session auto-completes on the schedule.
     func deductSession(forName name: String) {
         guard let index = clients.firstIndex(where: { $0.name == name }) else { return }
         clients[index].sessionsRemaining = max(0, clients[index].sessionsRemaining - 1)
     }
 
-    /// Refunds one session to the first client matching this name. Used when a
-    /// previously auto-counted session is skipped.
     func refundSession(forName name: String) {
         guard let index = clients.firstIndex(where: { $0.name == name }) else { return }
         clients[index].sessionsRemaining += 1
     }
 
-    /// Adjusts a client's session bank by a delta, clamped at zero. Used by the
-    /// profile financials ledger ([+] / [-] and package top-ups).
-    func adjustSessions(by delta: Int, for id: UUID) {
-        guard let index = clients.firstIndex(where: { $0.id == id }) else { return }
-        clients[index].sessionsRemaining = max(0, clients[index].sessionsRemaining + delta)
+    func applyClientDTO(_ dto: ClientDTO) {
+        let client = ClientLoader.client(from: dto)
+        if let index = clients.firstIndex(where: { $0.id == client.id }) {
+            clients[index] = client
+        }
+    }
+
+    @MainActor
+    private func persistArchive(_ archived: Bool, for id: UUID) async {
+        guard let token = AuthStore.accessToken else { return }
+        if let dto = try? await VerraAPI.updateClient(id: id, isArchived: archived, accessToken: token) {
+            applyClientDTO(dto)
+        }
     }
 }

@@ -659,8 +659,11 @@ enum VerraAPI {
         let heightCm: Int?
         let weightKg: Int?
         let goalWeightKg: Int?
+        let startWeightKg: Double?
         let note: String?
         let visibleModules: [String]?
+        let isArchived: Bool?
+        let sessionsRemaining: Int?
     }
 
     static func updateClient(
@@ -669,8 +672,11 @@ enum VerraAPI {
         heightCm: Int? = nil,
         weightKg: Int? = nil,
         goalWeightKg: Int? = nil,
+        startWeightKg: Double? = nil,
         note: String? = nil,
         visibleModules: [String]? = nil,
+        isArchived: Bool? = nil,
+        sessionsRemaining: Int? = nil,
         accessToken: String
     ) async throws -> ClientDTO {
         try await APIClient.shared.request(
@@ -681,9 +687,20 @@ enum VerraAPI {
                 heightCm: heightCm,
                 weightKg: weightKg,
                 goalWeightKg: goalWeightKg,
+                startWeightKg: startWeightKg,
                 note: note,
-                visibleModules: visibleModules
+                visibleModules: visibleModules,
+                isArchived: isArchived,
+                sessionsRemaining: sessionsRemaining
             ),
+            token: accessToken
+        )
+    }
+
+    static func deleteClient(id: UUID, accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/clients/\(id.uuidString)",
+            method: "DELETE",
             token: accessToken
         )
     }
@@ -791,14 +808,25 @@ enum VerraAPI {
         let occurredAt: Date
     }
 
+    struct FinancialBucketDTO: Codable {
+        let label: String
+        let revenue: Double
+        let sessions: Int
+    }
+
     struct FinancialSummaryDTO: Codable {
         let revenue: Double
         let sessionsUsed: Int
         let events: [FinancialEventDTO]
+        let buckets: [FinancialBucketDTO]?
     }
 
     static func fetchFinancialSummary(filter: String, accessToken: String) async throws -> FinancialSummaryDTO {
         try await APIClient.shared.request("/api/financials?filter=\(filter)", token: accessToken)
+    }
+
+    static func fetchClientLedger(clientID: UUID, accessToken: String) async throws -> [FinancialEventDTO] {
+        try await APIClient.shared.request("/api/financials/clients/\(clientID.uuidString)", token: accessToken)
     }
 
     static func createFinancialEvent(_ body: CreateFinancialEventBody, accessToken: String) async throws -> FinancialEventDTO {
@@ -1051,11 +1079,31 @@ enum VerraAPI {
     }
 
     struct NotificationPreferencesDTO: Codable {
+        let notificationsEnabled: Bool
+        let notifyMoney: Bool
         let notifySchedule: Bool
         let notifyMessages: Bool
         let notifyActivity: Bool
+        let activityMode: String
+        let quietHoursEnabled: Bool
+        let quietStartMinutes: Int
+        let quietEndMinutes: Int
         let smsEnabled: Bool
         let reminderMinutesBefore: Int
+    }
+
+    struct UpdateNotificationPreferencesBody: Encodable {
+        var notificationsEnabled: Bool? = nil
+        var notifyMoney: Bool? = nil
+        var notifySchedule: Bool? = nil
+        var notifyMessages: Bool? = nil
+        var notifyActivity: Bool? = nil
+        var activityMode: String? = nil
+        var quietHoursEnabled: Bool? = nil
+        var quietStartMinutes: Int? = nil
+        var quietEndMinutes: Int? = nil
+        var smsEnabled: Bool? = nil
+        var reminderMinutesBefore: Int? = nil
     }
 
     static func fetchNotifications(accessToken: String) async throws -> [UserNotificationDTO] {
@@ -1063,7 +1111,7 @@ enum VerraAPI {
     }
 
     static func markNotificationRead(id: UUID, accessToken: String) async throws {
-        let _: EmptyResponse = try await APIClient.shared.request(
+        try await APIClient.shared.requestVoid(
             "/api/notifications/\(id.uuidString)/read",
             method: "PATCH",
             token: accessToken
@@ -1071,7 +1119,7 @@ enum VerraAPI {
     }
 
     static func markAllNotificationsRead(accessToken: String) async throws {
-        let _: EmptyResponse = try await APIClient.shared.request(
+        try await APIClient.shared.requestVoid(
             "/api/notifications/read-all",
             method: "PATCH",
             token: accessToken
@@ -1082,7 +1130,7 @@ enum VerraAPI {
         try await APIClient.shared.request("/api/notifications/preferences", token: accessToken)
     }
 
-    static func updateNotificationPreferences(_ body: NotificationPreferencesDTO, accessToken: String) async throws -> NotificationPreferencesDTO {
+    static func updateNotificationPreferences(_ body: UpdateNotificationPreferencesBody, accessToken: String) async throws -> NotificationPreferencesDTO {
         try await APIClient.shared.request(
             "/api/notifications/preferences",
             method: "PATCH",
@@ -1091,13 +1139,70 @@ enum VerraAPI {
         )
     }
 
+    // MARK: - Account
+
+    static func changePassword(currentPassword: String, newPassword: String, accessToken: String) async throws {
+        struct Body: Encodable {
+            let currentPassword: String
+            let newPassword: String
+        }
+        let _: MessageResponse = try await APIClient.shared.request(
+            "/api/account/password",
+            method: "PATCH",
+            body: Body(currentPassword: currentPassword, newPassword: newPassword),
+            token: accessToken
+        )
+    }
+
+    static func deleteAccount(accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/account",
+            method: "DELETE",
+            token: accessToken
+        )
+    }
+
+    static func submitSupportTicket(topic: String, message: String, attachmentData: Data?, accessToken: String) async throws {
+        let _: SupportTicketResponse = try await APIClient.shared.uploadMultipart(
+            path: "/api/account/support",
+            fields: [
+                "topic": topic,
+                "message": message,
+            ],
+            fileField: attachmentData == nil ? nil : "attachment",
+            fileData: attachmentData,
+            filename: "screenshot.jpg",
+            mimeType: "image/jpeg",
+            token: accessToken
+        )
+    }
+
+    struct MessageResponse: Codable {
+        let message: String
+    }
+
+    struct SupportTicketResponse: Codable {
+        let id: UUID
+        let topic: String
+        let status: String
+    }
+
     // MARK: - Subscriptions
 
     struct SubscriptionDTO: Codable {
         let productID: String
         let status: String
+        let startedAt: Date?
         let expiresAt: Date?
         let isActive: Bool
+    }
+
+    static func fetchCurrentSubscription(accessToken: String) async -> SubscriptionDTO? {
+        do {
+            return try await APIClient.shared.request("/api/subscriptions/me", token: accessToken)
+        } catch {
+            return nil
+        }
     }
 
     static func validateReceipt(receiptData: String, productID: String, accessToken: String) async throws -> SubscriptionDTO {

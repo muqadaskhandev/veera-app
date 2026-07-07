@@ -24,6 +24,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		05D797DC2FFD9696001F0A43 /* VerraSubscriptions.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = VerraSubscriptions.storekit; sourceTree = "<group>"; };
 		105FC57A2E9EAD3100EA8BCF /* VerraOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VerraOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5892E9EAD3200EA8BCF /* VerraOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VerraOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5932E9EAD3200EA8BCF /* VerraOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VerraOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -75,6 +76,7 @@
 		105FC5712E9EAD3100EA8BCF = {
 			isa = PBXGroup;
 			children = (
+				05D797DC2FFD9696001F0A43 /* VerraSubscriptions.storekit */,
 				105FC57C2E9EAD3100EA8BCF /* VerraOS */,
 				105FC58C2E9EAD3200EA8BCF /* VerraOSTests */,
 				105FC5962E9EAD3200EA8BCF /* VerraOSUITests */,

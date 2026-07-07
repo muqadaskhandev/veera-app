@@ -32,6 +32,7 @@ final class ScheduleStore {
     var isRefreshingCalendar = false
 
     private static let prefsKey = "verra.schedule.calendarPrefs"
+    var onCalendarPrefsPersisted: ((String) -> Void)?
 
     init(sessions: [Session] = Session.sample, clients: [Client] = Client.roster) {
         self.sessions = sessions
@@ -99,7 +100,33 @@ final class ScheduleStore {
 
     /// Coaching sessions in the week containing `anchor`.
     func sessionsInWeek(containing anchor: Date = Date()) -> [Session] {
-        ScheduleCalendar.sessionsInWeek(sessions, containing: anchor)
+        ScheduleCalendar.sessionsInWeek(coachingSessions, containing: anchor)
+    }
+
+    /// Trainer coaching sessions only — excludes personal blocks and imported calendar busy time.
+    var coachingSessions: [Session] {
+        sessions.filter { $0.accent != .personal && $0.notes != CalendarSyncService.importedMarker }
+    }
+
+    /// Next upcoming coaching session across the full schedule.
+    var nextUpcomingSession: Session? {
+        let now = Date()
+        return coachingSessions
+            .filter { !$0.isCompleted && !$0.isSkipped && $0.scheduledAt > now }
+            .sorted { $0.scheduledAt < $1.scheduledAt }
+            .first
+    }
+
+    /// Week-over-week change in scheduled coaching volume.
+    func weeklyVolumeTrend(containing anchor: Date = Date()) -> (isUp: Bool, delta: Int) {
+        let calendar = Calendar.current
+        let thisWeek = sessionsInWeek(containing: anchor).count
+        guard let lastWeekAnchor = calendar.date(byAdding: .weekOfYear, value: -1, to: anchor) else {
+            return (thisWeek >= 0, 0)
+        }
+        let lastWeek = ScheduleCalendar.sessionsInWeek(coachingSessions, containing: lastWeekAnchor).count
+        let delta = thisWeek - lastWeek
+        return (delta >= 0, abs(delta))
     }
 
     /// Remaining package sessions for the client matching this session, if any.
@@ -110,7 +137,11 @@ final class ScheduleStore {
     // MARK: Calendar sync
 
     func loadCalendarPrefs() {
-        guard let data = UserDefaults.standard.data(forKey: Self.prefsKey),
+        // Preferences are loaded from the server via `loadCalendarPrefsFromServer`.
+    }
+
+    func loadCalendarPrefsFromServer(_ json: String?) {
+        guard let json, let data = json.data(using: .utf8),
               let prefs = try? JSONDecoder().decode(CalendarPrefs.self, from: data) else { return }
         googleLinked = prefs.googleLinked
         appleLinked = prefs.appleLinked
@@ -119,7 +150,6 @@ final class ScheduleStore {
         calendarReminderMinutesBefore = prefs.calendarReminderMinutesBefore ?? 60
         blockConflictsOnSave = prefs.blockConflictsOnSave ?? true
         useDedicatedVerraCalendar = prefs.useDedicatedVerraCalendar ?? true
-        // Apple export used to default off; enable when Apple Calendar is already linked.
         if appleLinked, !exportSessions {
             exportSessions = true
             saveCalendarPrefs()
@@ -148,8 +178,9 @@ final class ScheduleStore {
             blockConflictsOnSave: blockConflictsOnSave,
             useDedicatedVerraCalendar: useDedicatedVerraCalendar
         )
-        if let data = try? JSONEncoder().encode(prefs) {
-            UserDefaults.standard.set(data, forKey: Self.prefsKey)
+        if let data = try? JSONEncoder().encode(prefs),
+           let json = String(data: data, encoding: .utf8) {
+            onCalendarPrefsPersisted?(json)
         }
     }
 

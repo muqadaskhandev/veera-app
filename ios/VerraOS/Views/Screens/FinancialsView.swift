@@ -17,45 +17,21 @@ struct FinancialsView: View {
     @State private var filter: FinTimeFilter = .all
     @State private var ledgerKind: LedgerKindFilter = .all
     @State private var ledgerExpanded: Bool = false
+    @State private var serverEvents: [FinEvent] = []
+    @State private var isLoading = false
 
     /// How many entries to preview while the ledger is collapsed.
     private let ledgerPreviewCount = 4
 
     // MARK: Derived data
 
-    /// Every financial event across all clients + consult comps, newest first.
+    /// Financial events from the API plus consult comps from the schedule, newest first.
     private var allEvents: [FinEvent] {
-        var events: [FinEvent] = []
+        var events = serverEvents
 
-        for client in clientStore.clients {
-            for entry in profile.ledgerSnapshot(for: client) {
-                switch entry.kind {
-                case .packageAdded:
-                    events.append(FinEvent(
-                        date: entry.date,
-                        clientName: client.name,
-                        detail: "bought \(entry.delta)-Pack",
-                        amount: entry.amount,
-                        kind: .income
-                    ))
-                case .sessionUsed:
-                    events.append(FinEvent(
-                        date: entry.date,
-                        clientName: client.name,
-                        detail: "Session Used",
-                        amount: nil,
-                        kind: .usage
-                    ))
-                case .adjustment:
-                    continue
-                }
-            }
-        }
-
-        // Free consultations from the schedule count as comps ($0).
         for session in schedule.sessions where session.accent == .consult {
             events.append(FinEvent(
-                date: sessionDate(session),
+                date: session.scheduledAt,
                 clientName: session.clientName,
                 detail: "Consult",
                 amount: 0,
@@ -109,6 +85,17 @@ struct FinancialsView: View {
         }
         .tabScrollContent()
         .background(Theme.Color.background)
+        .opacity(isLoading && serverEvents.isEmpty ? 0.6 : 1)
+        .overlay {
+            if isLoading && serverEvents.isEmpty {
+                ProgressView()
+            }
+        }
+        .task { await refresh() }
+        .onChange(of: filter) { _, _ in
+            Task { await refresh() }
+        }
+        .refreshable { await refresh() }
     }
 
     // MARK: Time filter
@@ -174,7 +161,7 @@ struct FinancialsView: View {
                 )
                 BigStatCard(
                     label: "Avg / Session",
-                    value: avgPrice > 0 ? currency(avgPrice, fraction: 2) : "—",
+                    value: avgPrice > 0 ? currency(avgPrice, fraction: 0) : "—",
                     caption: "Are you charging enough?",
                     icon: "chart.line.uptrend.xyaxis",
                     style: .surface
@@ -348,19 +335,62 @@ struct FinancialsView: View {
 
     // MARK: Helpers
 
+    @MainActor
+    private func refresh() async {
+        guard let token = AuthStore.accessToken else { return }
+        isLoading = true
+        defer { isLoading = false }
+
+        await clientStore.refreshFromServer()
+        await schedule.refreshFromServer()
+
+        do {
+            let summary = try await VerraAPI.fetchFinancialSummary(
+                filter: filter.apiFilter,
+                accessToken: token
+            )
+            PlatformLoader.applyFinancialEvents(summary.events, clients: clientStore.clients, to: profile)
+            serverEvents = PlatformLoader.finEvents(from: summary.events)
+        } catch {
+            serverEvents = fallbackEventsFromProfiles()
+        }
+    }
+
+    /// Local ledger fallback when the API is unreachable.
+    private func fallbackEventsFromProfiles() -> [FinEvent] {
+        var events: [FinEvent] = []
+        for client in clientStore.clients {
+            for entry in profile.ledgerSnapshot(for: client) {
+                switch entry.kind {
+                case .packageAdded:
+                    events.append(FinEvent(
+                        id: entry.id,
+                        date: entry.date,
+                        clientName: client.name,
+                        detail: "bought \(entry.delta)-Pack",
+                        amount: entry.amount,
+                        kind: .income
+                    ))
+                case .sessionUsed:
+                    events.append(FinEvent(
+                        id: entry.id,
+                        date: entry.date,
+                        clientName: client.name,
+                        detail: "Session Used",
+                        amount: nil,
+                        kind: .usage
+                    ))
+                case .adjustment:
+                    continue
+                }
+            }
+        }
+        return events
+    }
+
     private func currency(_ value: Double, fraction: Int) -> String {
         let rounded = value.rounded(toPlaces: fraction)
         return rounded.formatted(.currency(code: "USD").precision(.fractionLength(fraction)))
-    }
-
-    /// Maps a schedule session (current month, by day-of-month) to a Date.
-    private func sessionDate(_ session: Session) -> Date {
-        let cal = Calendar.current
-        var comps = cal.dateComponents([.year, .month], from: Date())
-        comps.day = session.dayOfMonth
-        comps.hour = session.startMinutes / 60
-        comps.minute = session.startMinutes % 60
-        return cal.date(from: comps) ?? Date()
     }
 
     // MARK: Trend buckets

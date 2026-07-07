@@ -16,6 +16,7 @@ struct ClientDTO: Codable {
     let heightCm: Int?
     let weightKg: Int?
     let goalWeightKg: Int?
+    let startWeightKg: Double?
     let injuryHistory: String
     let primaryGoal: String
     let skillLevel: String
@@ -41,6 +42,7 @@ enum ClientLoader {
             heightCm: dto.heightCm,
             weightKg: dto.weightKg,
             goalWeightKg: dto.goalWeightKg,
+            startWeightKg: dto.startWeightKg,
             injuryHistory: dto.injuryHistory,
             primaryGoal: dto.primaryGoal,
             skillLevel: dto.skillLevel,

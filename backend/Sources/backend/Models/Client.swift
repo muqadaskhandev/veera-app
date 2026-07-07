@@ -49,6 +49,9 @@ final class Client: Model, @unchecked Sendable {
     @OptionalField(key: "goal_weight_kg")
     var goalWeightKg: Int?
 
+    @OptionalField(key: "start_weight_kg")
+    var startWeightKg: Double?
+
     @Field(key: "injury_history")
     var injuryHistory: String
 
@@ -139,6 +142,7 @@ struct ClientDTO: Content {
     let heightCm: Int?
     let weightKg: Int?
     let goalWeightKg: Int?
+    let startWeightKg: Double?
     let injuryHistory: String
     let primaryGoal: String
     let skillLevel: String
@@ -165,6 +169,7 @@ struct ClientDTO: Content {
         self.heightCm = client.heightCm
         self.weightKg = client.weightKg
         self.goalWeightKg = client.goalWeightKg
+        self.startWeightKg = client.startWeightKg
         self.injuryHistory = client.injuryHistory
         self.primaryGoal = client.primaryGoal
         self.skillLevel = client.skillLevel
@@ -195,6 +200,7 @@ struct CreateClientRequest: Content {
     var heightCm: Int?
     var weightKg: Int?
     var goalWeightKg: Int?
+    var startWeightKg: Double?
     var injuryHistory: String?
     var primaryGoal: String?
     var skillLevel: String?
@@ -244,6 +250,7 @@ struct UpdateClientRequest: Content {
     var heightCm: Int?
     var weightKg: Int?
     var goalWeightKg: Int?
+    var startWeightKg: Double?
     var injuryHistory: String?
     var primaryGoal: String?
     var skillLevel: String?

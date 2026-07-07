@@ -5,6 +5,7 @@ func routes(_ app: Application) throws {
         HealthResponse(status: "ok", service: "verra-api")
     }
 
+    try app.register(collection: AccountController())
     try app.register(collection: AuthController())
     try app.register(collection: OnboardingController())
     try app.register(collection: InviteController())
@@ -21,6 +22,7 @@ func routes(_ app: Application) throws {
     try app.register(collection: NotificationController())
     try app.register(collection: ExerciseController())
     try app.register(collection: SubscriptionController())
+    try app.register(collection: AppStoreWebhookController())
     try app.register(collection: StorageController())
     try app.register(collection: NotificationWebhookController())
     try app.register(collection: CalendarController())

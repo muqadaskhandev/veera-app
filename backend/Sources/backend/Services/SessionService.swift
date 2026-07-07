@@ -75,6 +75,8 @@ enum SessionService {
     ) async throws -> SessionDTO {
         let session = try await requireSession(sessionID, for: user, on: database)
 
+        let wasCompleted = session.isCompleted
+
         if let clientID = payload.clientID { session.$client.id = clientID }
         if let clientName = payload.clientName { session.clientName = clientName }
         if let focus = payload.focus { session.focus = focus }
@@ -89,8 +91,8 @@ enum SessionService {
 
         try await session.save(on: database)
 
-        if payload.isCompleted == true {
-            try await handleSessionCompleted(session, on: database)
+        if payload.isCompleted == true, !wasCompleted {
+            try await handleSessionCompleted(session, on: database, app: app)
         }
 
         if payload.isSkipped == true || payload.isCancelled == true {
@@ -137,7 +139,13 @@ enum SessionService {
         }
     }
 
-    private static func handleSessionCompleted(_ session: Session, on database: any Database) async throws {
+    private static func handleSessionCompleted(_ session: Session, on database: any Database, app: Application) async throws {
+        guard let sessionID = session.id else { return }
+        let alreadyLogged = try await FinancialEvent.query(on: database)
+            .filter(\.$session.$id == sessionID)
+            .first() != nil
+        guard !alreadyLogged else { return }
+
         guard let clientID = session.$client.id,
               let client = try await Client.find(clientID, on: database) else { return }
 
@@ -149,7 +157,7 @@ enum SessionService {
         let event = FinancialEvent(
             trainerID: session.$trainer.id,
             clientID: clientID,
-            sessionID: session.id,
+            sessionID: sessionID,
             kind: "usage",
             title: "Session completed",
             detail: session.focus,
@@ -158,6 +166,22 @@ enum SessionService {
             occurredAt: session.scheduledAt
         )
         try await event.save(on: database)
+
+        if let clientUserID = client.$user.id {
+            let remaining = client.sessionsRemaining
+            let remainingLabel = remaining == 1 ? "1 session" : "\(remaining) sessions"
+            await UserNotificationDeliveryService.deliver(
+                to: clientUserID,
+                topic: .activity,
+                category: "activity",
+                title: "Session completed",
+                body: "1 session used. \(remainingLabel) remaining.",
+                pushKind: .activityAlert,
+                sessionID: sessionID,
+                on: database,
+                app: app
+            )
+        }
     }
 
     private static func notifySessionCreated(_ session: Session, trainer: Trainer, on database: any Database, app: Application) async throws {
@@ -166,12 +190,16 @@ enum SessionService {
               let userID = client.$user.id,
               let clientUser = try await User.find(userID, on: database) else { return }
 
-        try await NotificationService.create(
-            userID: userID,
+        await UserNotificationDeliveryService.deliver(
+            to: userID,
+            topic: .schedule,
             category: "schedule",
             title: "New session scheduled",
             body: "\(trainer.name) scheduled \(session.focus) on \(Self.timeLabel(session.scheduledAt)).",
-            on: database
+            pushKind: .sessionScheduled,
+            sessionID: session.id,
+            on: database,
+            app: app
         )
 
         let prefs = try await NotificationService.preferences(for: clientUser, on: database)
@@ -199,12 +227,16 @@ enum SessionService {
               let client = try await Client.find(clientID, on: database),
               let userID = client.$user.id else { return }
 
-        try await NotificationService.create(
-            userID: userID,
-            category: "schedule",
+        await UserNotificationDeliveryService.deliver(
+            to: userID,
+            topic: .schedule,
+            category: "cancellation",
             title: "Session cancelled",
             body: "Your \(session.focus) session on \(Self.timeLabel(session.scheduledAt)) was cancelled.",
-            on: database
+            pushKind: .sessionCancelled,
+            sessionID: session.id,
+            on: database,
+            app: app
         )
     }
 

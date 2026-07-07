@@ -91,6 +91,7 @@ struct ClientController: RouteCollection {
         if let heightCm = payload.heightCm { client.heightCm = heightCm }
         if let weightKg = payload.weightKg { client.weightKg = weightKg }
         if let goalWeightKg = payload.goalWeightKg { client.goalWeightKg = goalWeightKg }
+        if let startWeightKg = payload.startWeightKg { client.startWeightKg = startWeightKg }
         if let injuryHistory = payload.injuryHistory { client.injuryHistory = injuryHistory }
         if let primaryGoal = payload.primaryGoal { client.primaryGoal = primaryGoal }
         if let skillLevel = payload.skillLevel { client.skillLevel = skillLevel }
@@ -107,7 +108,7 @@ struct ClientController: RouteCollection {
     @Sendable
     func delete(req: Request) async throws -> HTTPStatus {
         let client = try await requireClient(req)
-        try await client.delete(on: req.db)
+        try await ClientDeletionService.delete(client, on: req.db)
         return .noContent
     }
 

@@ -435,6 +435,12 @@ final class NotificationPreferences: Model, @unchecked Sendable {
     @Field(key: "notify_activity") var notifyActivity: Bool
     @Field(key: "sms_enabled") var smsEnabled: Bool
     @Field(key: "reminder_minutes_before") var reminderMinutesBefore: Int
+    @Field(key: "notifications_enabled") var notificationsEnabled: Bool
+    @Field(key: "notify_money") var notifyMoney: Bool
+    @Field(key: "activity_mode") var activityMode: String
+    @Field(key: "quiet_hours_enabled") var quietHoursEnabled: Bool
+    @Field(key: "quiet_start_minutes") var quietStartMinutes: Int
+    @Field(key: "quiet_end_minutes") var quietEndMinutes: Int
     @Timestamp(key: "created_at", on: .create) var createdAt: Date?
     @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
 
@@ -447,29 +453,53 @@ final class NotificationPreferences: Model, @unchecked Sendable {
         self.notifyActivity = true
         self.smsEnabled = false
         self.reminderMinutesBefore = 60
+        self.notificationsEnabled = true
+        self.notifyMoney = true
+        self.activityMode = "personalBests"
+        self.quietHoursEnabled = true
+        self.quietStartMinutes = 22 * 60
+        self.quietEndMinutes = 6 * 60
     }
 }
 
 struct NotificationPreferencesDTO: Content {
+    let notificationsEnabled: Bool
+    let notifyMoney: Bool
     let notifySchedule: Bool
     let notifyMessages: Bool
     let notifyActivity: Bool
+    let activityMode: String
+    let quietHoursEnabled: Bool
+    let quietStartMinutes: Int
+    let quietEndMinutes: Int
     let smsEnabled: Bool
     let reminderMinutesBefore: Int
 
     init(from prefs: NotificationPreferences) {
+        self.notificationsEnabled = prefs.notificationsEnabled
+        self.notifyMoney = prefs.notifyMoney
         self.notifySchedule = prefs.notifySchedule
         self.notifyMessages = prefs.notifyMessages
         self.notifyActivity = prefs.notifyActivity
+        self.activityMode = prefs.activityMode
+        self.quietHoursEnabled = prefs.quietHoursEnabled
+        self.quietStartMinutes = prefs.quietStartMinutes
+        self.quietEndMinutes = prefs.quietEndMinutes
         self.smsEnabled = prefs.smsEnabled
         self.reminderMinutesBefore = prefs.reminderMinutesBefore
     }
 }
 
 struct UpdateNotificationPreferencesRequest: Content {
+    var notificationsEnabled: Bool?
+    var notifyMoney: Bool?
     var notifySchedule: Bool?
     var notifyMessages: Bool?
     var notifyActivity: Bool?
+    var activityMode: String?
+    var quietHoursEnabled: Bool?
+    var quietStartMinutes: Int?
+    var quietEndMinutes: Int?
     var smsEnabled: Bool?
     var reminderMinutesBefore: Int?
 }
@@ -497,6 +527,45 @@ final class ScheduledReminder: Model, @unchecked Sendable {
     }
 }
 
+// MARK: - Support
+
+final class SupportTicket: Model, @unchecked Sendable {
+    static let schema = "support_tickets"
+
+    @ID(key: .id) var id: UUID?
+    @Parent(key: "user_id") var user: User
+    @Field(key: "topic") var topic: String
+    @Field(key: "message") var message: String
+    @OptionalField(key: "attachment_path") var attachmentPath: String?
+    @Field(key: "status") var status: String
+    @Timestamp(key: "created_at", on: .create) var createdAt: Date?
+
+    init() {}
+
+    init(userID: UUID, topic: String, message: String, attachmentPath: String?) {
+        self.$user.id = userID
+        self.topic = topic
+        self.message = message
+        self.attachmentPath = attachmentPath
+        self.status = "open"
+    }
+}
+
+struct SupportTicketDTO: Content {
+    let id: UUID
+    let topic: String
+    let status: String
+    let createdAt: Date?
+
+    init(from ticket: SupportTicket) throws {
+        guard let id = ticket.id else { throw Abort(.internalServerError) }
+        self.id = id
+        self.topic = ticket.topic
+        self.status = ticket.status
+        self.createdAt = ticket.createdAt
+    }
+}
+
 // MARK: - Subscriptions
 
 final class Subscription: Model, @unchecked Sendable {
@@ -508,18 +577,21 @@ final class Subscription: Model, @unchecked Sendable {
     @Field(key: "original_transaction_id") var originalTransactionID: String
     @OptionalField(key: "latest_receipt") var latestReceipt: String?
     @Field(key: "status") var status: String
+    @OptionalField(key: "started_at") var startedAt: Date?
     @OptionalField(key: "expires_at") var expiresAt: Date?
+    @OptionalField(key: "expiry_notified_at") var expiryNotifiedAt: Date?
     @Timestamp(key: "created_at", on: .create) var createdAt: Date?
     @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
 
     init() {}
 
-    init(userID: UUID, productID: String, originalTransactionID: String, latestReceipt: String?, status: String, expiresAt: Date?) {
+    init(userID: UUID, productID: String, originalTransactionID: String, latestReceipt: String?, status: String, startedAt: Date? = nil, expiresAt: Date?) {
         self.$user.id = userID
         self.productID = productID
         self.originalTransactionID = originalTransactionID
         self.latestReceipt = latestReceipt
         self.status = status
+        self.startedAt = startedAt
         self.expiresAt = expiresAt
     }
 }
@@ -527,12 +599,14 @@ final class Subscription: Model, @unchecked Sendable {
 struct SubscriptionDTO: Content {
     let productID: String
     let status: String
+    let startedAt: Date?
     let expiresAt: Date?
     let isActive: Bool
 
     init(from subscription: Subscription) {
         self.productID = subscription.productID
         self.status = subscription.status
+        self.startedAt = subscription.startedAt
         self.expiresAt = subscription.expiresAt
         self.isActive = subscription.status == "active" && (subscription.expiresAt.map { $0 > Date() } ?? true)
     }

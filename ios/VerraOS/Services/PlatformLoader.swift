@@ -114,6 +114,36 @@ enum PlatformLoader {
         }
     }
 
+    /// Maps API financial events into ledger rows for the Financials tab.
+    static func finEvents(from dtos: [VerraAPI.FinancialEventDTO]) -> [FinEvent] {
+        dtos.compactMap { dto in
+            let clientName = dto.clientName ?? "Client"
+            switch dto.kind {
+            case "income":
+                let detail = dto.sessionDelta > 0 ? "bought \(dto.sessionDelta)-Pack" : dto.detail
+                return FinEvent(
+                    id: dto.id,
+                    date: dto.occurredAt,
+                    clientName: clientName,
+                    detail: detail,
+                    amount: dto.amount,
+                    kind: .income
+                )
+            case "usage":
+                return FinEvent(
+                    id: dto.id,
+                    date: dto.occurredAt,
+                    clientName: clientName,
+                    detail: "Session Used",
+                    amount: nil,
+                    kind: .usage
+                )
+            default:
+                return nil
+            }
+        }
+    }
+
     @MainActor
     static func applyWorkoutWeek(_ response: VerraAPI.WorkoutWeekResponse, clientID: UUID, week: Int, to profile: ProfileStore) {
         profile.replaceWorkoutWeek(workoutDays(from: response.days), week: week, for: clientID, weekCount: response.weekCount)

@@ -56,7 +56,8 @@ enum FinancialService {
     static func createEvent(
         for user: User,
         payload: CreateFinancialEventRequest,
-        on database: any Database
+        on database: any Database,
+        app: Application
     ) async throws -> FinancialEventDTO {
         let client = try await ClientAccessService.requireClient(payload.clientID, for: user, on: database)
         let trainer: Trainer
@@ -84,6 +85,39 @@ enum FinancialService {
             occurredAt: payload.occurredAt ?? Date()
         )
         try await event.save(on: database)
+
+        if user.userRole == .trainer || user.userRole == .admin {
+            let category = payload.kind == "income" ? "payment" : "activity"
+            await UserNotificationDeliveryService.deliver(
+                to: user,
+                topic: payload.kind == "income" ? .money : .activity,
+                category: category,
+                title: payload.title,
+                body: payload.detail ?? payload.title,
+                pushKind: payload.kind == "income" ? .paymentLogged : .activityAlert,
+                on: database,
+                app: app
+            )
+        }
+
+        if payload.kind == "income", delta > 0, let clientUserID = client.$user.id {
+            let sessionLabel = delta == 1 ? "1 session" : "\(delta) sessions"
+            var body = "Your trainer added \(sessionLabel) to your account."
+            if let amount = payload.amount {
+                body = "Your trainer added \(sessionLabel) (\(String(format: "$%.0f", amount)))."
+            }
+            await UserNotificationDeliveryService.deliver(
+                to: clientUserID,
+                topic: .activity,
+                category: "payment",
+                title: "Sessions added",
+                body: body,
+                pushKind: .paymentLogged,
+                on: database,
+                app: app
+            )
+        }
+
         return try FinancialEventDTO(from: event, clientName: client.name)
     }
 
@@ -107,27 +141,63 @@ enum FinancialService {
 
     private static func makeBuckets(from events: [FinancialEvent], filter: String) -> [FinancialBucketDTO] {
         let calendar = Calendar.current
+        let now = Date()
+
         switch filter.lowercased() {
         case "week":
-            let labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-            return labels.enumerated().map { index, label in
-                let dayEvents = events.filter {
-                    calendar.component(.weekday, from: $0.occurredAt) == index + 1
-                }
+            return (0..<7).reversed().map { back in
+                let day = calendar.date(byAdding: .day, value: -back, to: now) ?? now
+                let start = calendar.startOfDay(for: day)
+                let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start
+                let slice = events.filter { $0.occurredAt >= start && $0.occurredAt < end }
+                let label = day.formatted(.dateTime.weekday(.narrow))
                 return FinancialBucketDTO(
                     label: label,
-                    revenue: dayEvents.filter { $0.kind == "income" }.compactMap(\.amount).reduce(0, +),
-                    sessions: dayEvents.filter { $0.kind == "usage" }.count
+                    revenue: slice.filter { $0.kind == "income" }.compactMap(\.amount).reduce(0, +),
+                    sessions: slice.filter { $0.kind == "usage" }.count
+                )
+            }
+        case "ytd":
+            let year = calendar.component(.year, from: now)
+            let currentMonth = calendar.component(.month, from: now)
+            return (1...currentMonth).map { month in
+                let start = calendar.date(from: DateComponents(year: year, month: month, day: 1)) ?? now
+                let end = calendar.date(byAdding: .month, value: 1, to: start) ?? start
+                let slice = events.filter { $0.occurredAt >= start && $0.occurredAt < end }
+                let label = start.formatted(.dateTime.month(.narrow))
+                return FinancialBucketDTO(
+                    label: label,
+                    revenue: slice.filter { $0.kind == "income" }.compactMap(\.amount).reduce(0, +),
+                    sessions: slice.filter { $0.kind == "usage" }.count
+                )
+            }
+        case "all":
+            return (0..<6).reversed().map { back in
+                let monthDate = calendar.date(byAdding: .month, value: -back, to: now) ?? now
+                let comps = calendar.dateComponents([.year, .month], from: monthDate)
+                let start = calendar.date(from: comps) ?? monthDate
+                let end = calendar.date(byAdding: .month, value: 1, to: start) ?? start
+                let slice = events.filter { $0.occurredAt >= start && $0.occurredAt < end }
+                let label = start.formatted(.dateTime.month(.narrow))
+                return FinancialBucketDTO(
+                    label: label,
+                    revenue: slice.filter { $0.kind == "income" }.compactMap(\.amount).reduce(0, +),
+                    sessions: slice.filter { $0.kind == "usage" }.count
                 )
             }
         default:
-            return [
-                FinancialBucketDTO(
-                    label: filter.capitalized,
-                    revenue: events.filter { $0.kind == "income" }.compactMap(\.amount).reduce(0, +),
-                    sessions: events.filter { $0.kind == "usage" }.count
-                ),
-            ]
+            let comps = calendar.dateComponents([.year, .month], from: now)
+            let monthStart = calendar.date(from: comps) ?? now
+            return (0..<4).map { week in
+                let start = calendar.date(byAdding: .day, value: week * 7, to: monthStart) ?? monthStart
+                let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start
+                let slice = events.filter { $0.occurredAt >= start && $0.occurredAt < end }
+                return FinancialBucketDTO(
+                    label: "W\(week + 1)",
+                    revenue: slice.filter { $0.kind == "income" }.compactMap(\.amount).reduce(0, +),
+                    sessions: slice.filter { $0.kind == "usage" }.count
+                )
+            }
         }
     }
 }

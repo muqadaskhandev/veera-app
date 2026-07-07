@@ -88,6 +88,7 @@ struct Client: Identifiable, Hashable {
     var heightCm: Int?
     var weightKg: Int?
     var goalWeightKg: Int?
+    var startWeightKg: Double?
     var injuryHistory: String
     var primaryGoal: String
     var skillLevel: String
@@ -113,6 +114,7 @@ struct Client: Identifiable, Hashable {
         heightCm: Int? = nil,
         weightKg: Int? = nil,
         goalWeightKg: Int? = nil,
+        startWeightKg: Double? = nil,
         injuryHistory: String = "",
         primaryGoal: String = "",
         skillLevel: String = "",
@@ -134,6 +136,7 @@ struct Client: Identifiable, Hashable {
         self.heightCm = heightCm
         self.weightKg = weightKg
         self.goalWeightKg = goalWeightKg
+        self.startWeightKg = startWeightKg
         self.injuryHistory = injuryHistory
         self.primaryGoal = primaryGoal
         self.skillLevel = skillLevel

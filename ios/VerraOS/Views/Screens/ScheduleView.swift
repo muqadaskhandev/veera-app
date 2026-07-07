@@ -40,11 +40,21 @@ struct ScheduleView: View {
         store.sessionsInWeek(containing: selectedDate).count
     }
 
+    private var weeklyVolumeTrend: (isUp: Bool, delta: Int) {
+        store.weeklyVolumeTrend(containing: selectedDate)
+    }
+
+    /// Total pre-paid sessions left across the active client roster.
+    private var packageSessionsRemaining: Int {
+        clientStore.activeClients.reduce(0) { $0 + $1.sessionsRemaining }
+    }
+
     /// Live remaining sessions for the selected day: scheduled, not skipped,
     /// not completed, and not yet elapsed — ordered by start time.
     private var remainingToday: [Session] {
         daySessions
-            .filter { !$0.isCompleted && !$0.isSkipped && !store.hasPassed($0) }
+            .filter { !$0.isCompleted && !$0.isSkipped && $0.accent != .personal && !isImportedBusyBlock($0) }
+            .filter { !store.hasPassed($0) }
             .sorted { $0.startMinutes < $1.startMinutes }
     }
 
@@ -79,6 +89,8 @@ struct ScheduleView: View {
             selectedDate = Date()
             store.visibleMonthAnchor = Date()
             Task {
+                await clientStore.refreshFromServer()
+                clientStore.syncRoster(to: store)
                 await store.refreshFromServer()
                 await store.refreshCalendarData()
             }
@@ -197,6 +209,26 @@ struct ScheduleView: View {
         }
     }
 
+    private var nextSessionSubtitle: String {
+        if let session = store.nextUpcomingSession {
+            let dayLabel = Calendar.current.isDateInToday(session.scheduledAt)
+                ? Session.display(session.startMinutes)
+                : "\(session.scheduledAt.formatted(.dateTime.weekday(.abbreviated).hour().minute()))"
+            return "Next: \(dayLabel) · \(session.clientName)"
+        }
+        if !remainingToday.isEmpty {
+            return "Today: \(remainingToday.count) left"
+        }
+        return packageSessionsRemaining == 0 ? "No credits left" : "Nothing scheduled"
+    }
+
+    private var nextSessionSubtitleIcon: String {
+        if store.nextUpcomingSession != nil || !remainingToday.isEmpty {
+            return "arrow.turn.down.right"
+        }
+        return "checkmark.circle"
+    }
+
     // MARK: Pacing header (2-card dashboard)
 
     private var pacingHeader: some View {
@@ -206,7 +238,9 @@ struct ScheduleView: View {
                     Text("\(weeklyVolume)")
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.Color.background)
-                    TrendBadge(isUp: true, value: 4)
+                    if weeklyVolumeTrend.delta > 0 {
+                        TrendBadge(isUp: weeklyVolumeTrend.isUp, value: weeklyVolumeTrend.delta)
+                    }
                 }
                 Text("sessions this week")
                     .font(.system(size: 12, weight: .medium))
@@ -215,15 +249,15 @@ struct ScheduleView: View {
             .background(Theme.Color.ink, in: RoundedRectangle(cornerRadius: Theme.Radius.lg))
 
             PacingCard(title: "Sessions Remaining") {
-                Text(remainingToday.isEmpty ? "All done" : "\(remainingToday.count) Left")
+                Text(packageSessionsRemaining == 0 ? "All done" : "\(packageSessionsRemaining)")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .foregroundStyle(Theme.Color.ink)
                     .contentTransition(.numericText())
-                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: remainingToday.count)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: packageSessionsRemaining)
                 HStack(spacing: 5) {
-                    Image(systemName: remainingToday.isEmpty ? "checkmark.circle" : "arrow.turn.down.right")
+                    Image(systemName: nextSessionSubtitleIcon)
                         .font(.system(size: 10, weight: .bold))
-                    Text(remainingToday.first.map { "Next: \(Session.display($0.startMinutes))" } ?? "No sessions left")
+                    Text(nextSessionSubtitle)
                         .font(.system(size: 12, weight: .semibold))
                 }
                 .foregroundStyle(Theme.Color.inkMuted)
@@ -246,7 +280,7 @@ struct ScheduleView: View {
             Button {
                 showingSync = true
             } label: {
-                SyncIndicator(isSynced: store.isSynced)
+                SyncIndicator(isSynced: store.isSynced, isSyncing: store.isRefreshingCalendar)
             }
             .buttonStyle(.plain)
         }
@@ -361,8 +395,17 @@ private struct ModeSwitcher: View {
 
 private struct SyncIndicator: View {
     let isSynced: Bool
+    let isSyncing: Bool
 
-    private var color: Color { isSynced ? Color(hex: 0x57C77B) : Theme.Color.inkFaint }
+    private var color: Color {
+        if isSyncing { return Color(hex: 0xE7B83C) }
+        return isSynced ? Color(hex: 0x57C77B) : Theme.Color.inkFaint
+    }
+
+    private var label: String {
+        if isSyncing { return "Syncing" }
+        return isSynced ? "Synced" : "Not linked"
+    }
 
     var body: some View {
         HStack(spacing: 5) {
@@ -374,7 +417,7 @@ private struct SyncIndicator: View {
             Circle()
                 .fill(color)
                 .frame(width: 7, height: 7)
-            Text(isSynced ? "Synced" : "Offline")
+            Text(label)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.Color.inkMuted)
         }

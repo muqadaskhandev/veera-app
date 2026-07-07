@@ -24,6 +24,16 @@ enum FinTimeFilter: String, CaseIterable, Identifiable {
         }
     }
 
+    /// API query parameter for `/api/financials`.
+    var apiFilter: String {
+        switch self {
+        case .week: return "week"
+        case .month: return "month"
+        case .ytd: return "ytd"
+        case .all: return "all"
+        }
+    }
+
     /// Whether the given date falls inside this window, relative to `now`.
     func contains(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> Bool {
         switch self {

@@ -59,6 +59,25 @@ struct ClientFinancialsView: View {
         }
         .background(Theme.Color.background)
         .toast($toast)
+        .task {
+            await refreshFinancials()
+        }
+    }
+
+    @MainActor
+    private func refreshFinancials() async {
+        await profile.refreshLedger(for: clientID)
+        await refreshLinkedClientIfNeeded()
+    }
+
+    /// Client app only — refreshes session bank from profile API without requiring ClientAccountStore.
+    @MainActor
+    private func refreshLinkedClientIfNeeded() async {
+        guard isReadOnly, let token = AuthStore.accessToken else { return }
+        guard let response = try? await VerraAPI.fetchProfile(accessToken: token),
+              let clientDTO = response.client else { return }
+        let loaded = ProfileLoader.client(from: clientDTO)
+        clientStore.clients = [loaded]
     }
 
     private func content(_ client: Client) -> some View {
@@ -67,7 +86,11 @@ struct ClientFinancialsView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: Theme.Spacing.md) {
                     sessionBank(client)
-                    if !isReadOnly { packageCalculator(client) }
+                    if isReadOnly {
+                        clientPackageInfo(client)
+                    } else {
+                        packageCalculator(client)
+                    }
                     usageHistory(client)
                 }
                 .padding(.horizontal, Theme.Spacing.md)
@@ -75,7 +98,80 @@ struct ClientFinancialsView: View {
             }
             .frame(maxHeight: .infinity)
             .tabScrollContent()
+            .refreshable {
+                await refreshFinancials()
+            }
         }
+    }
+
+    // MARK: Client read-only package info
+
+    private func clientPackageInfo(_ client: Client) -> some View {
+        let packages = profile.ledger(for: client).filter { $0.kind == .packageAdded }
+        return VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            HStack(spacing: 10) {
+                Image(systemName: "info.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.Color.accentInk)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sessions are added by your trainer")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Theme.Color.ink)
+                    Text("When you purchase a package, your coach records it in their app and credits appear here automatically.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.Color.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if client.sessionsRemaining == 0 {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Theme.Color.danger)
+                    Text("You're out of sessions — message your trainer to buy a new package.")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.Color.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.Color.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+            }
+
+            if !packages.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("YOUR PACKAGES")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(Theme.Color.inkFaint)
+                    ForEach(packages.prefix(3)) { entry in
+                        HStack(spacing: 10) {
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(Color(hex: 0x57C77B))
+                            Text("+\(entry.delta) sessions")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Theme.Color.ink)
+                            if let amount = entry.amount {
+                                Text(String(format: "$%.0f", amount))
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Theme.Color.inkMuted)
+                            }
+                            Spacer()
+                            Text(entry.date.formatted(.dateTime.month(.abbreviated).day()))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.Color.inkFaint)
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding(Theme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+        .cardShadow(0.5)
     }
 
     // MARK: Session bank
@@ -171,7 +267,7 @@ struct ClientFinancialsView: View {
                         .font(.system(size: 13.5, weight: .medium))
                         .foregroundStyle(Theme.Color.inkMuted)
                     Spacer()
-                    Text(pricePerSession > 0 ? String(format: "$%.2f", pricePerSession) : "—")
+                    Text(pricePerSession > 0 ? String(format: "$%.0f", pricePerSession.rounded()) : "—")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.Color.ink)
                 }
@@ -228,7 +324,7 @@ struct ClientFinancialsView: View {
             VStack(spacing: 12) {
                 filterRow
                 if entries.isEmpty {
-                    Text("No entries for this filter.")
+                    Text(emptyHistoryMessage)
                         .font(.system(size: 13.5, weight: .medium))
                         .foregroundStyle(Theme.Color.inkMuted)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -257,6 +353,23 @@ struct ClientFinancialsView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var emptyHistoryMessage: String {
+        switch historyFilter {
+        case .all:
+            return isReadOnly
+                ? "No activity yet. Package purchases and completed sessions will show here."
+                : "No entries yet — add a package or log a session."
+        case .packages:
+            return isReadOnly
+                ? "No packages yet. Your trainer adds these after you purchase a session pack."
+                : "No packages yet — use the calculator above to add one."
+        case .sessions:
+            return "No completed sessions logged yet."
+        case .adjustments:
+            return "No manual adjustments yet."
         }
     }
 
@@ -301,7 +414,7 @@ struct ClientFinancialsView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(entry.kind.tint)
                 .frame(width: 20)
-            Text(entry.title)
+            Text(entry.kind == .packageAdded ? "Package added" : entry.title)
                 .font(.system(size: 13.5, weight: .semibold))
                 .foregroundStyle(Theme.Color.ink)
                 .lineLimit(1)
@@ -326,31 +439,76 @@ struct ClientFinancialsView: View {
     // MARK: Actions
 
     private func adjust(_ delta: Int, _ client: Client) {
-        clientStore.adjustSessions(by: delta, for: client.id)
-        guard let updated = self.client else { return }
-        let entry = LedgerEntry(
-            date: Date(),
-            title: delta > 0 ? "Manual Adjustment" : "Session Used",
-            delta: delta,
-            kind: delta > 0 ? .adjustment : .sessionUsed
-        )
-        profile.addLedgerEntry(entry, for: client.id)
-        toast = ToastData(message: "Bank: \(updated.sessionsRemaining) left", icon: delta > 0 ? "plus.circle.fill" : "minus.circle.fill")
+        Task { @MainActor in
+            guard let token = AuthStore.accessToken else { return }
+            let kind = delta > 0 ? "adjustment" : "usage"
+            let title = delta > 0 ? "Manual Adjustment" : "Session Used"
+            do {
+                let event = try await VerraAPI.createFinancialEvent(
+                    VerraAPI.CreateFinancialEventBody(
+                        clientID: client.id,
+                        kind: kind,
+                        title: title,
+                        detail: title,
+                        amount: nil,
+                        sessionDelta: delta
+                    ),
+                    accessToken: token
+                )
+                if let dto = try? await VerraAPI.fetchClients(accessToken: token).first(where: { $0.id == client.id }) {
+                    clientStore.applyClientDTO(dto)
+                }
+                let entry = LedgerEntry(
+                    id: event.id,
+                    date: event.occurredAt,
+                    title: event.title,
+                    delta: event.sessionDelta,
+                    amount: event.amount,
+                    kind: delta > 0 ? .adjustment : .sessionUsed
+                )
+                profile.addLedgerEntry(entry, for: client.id)
+                let remaining = clientStore.clients.first(where: { $0.id == client.id })?.sessionsRemaining ?? 0
+                toast = ToastData(message: "Bank: \(remaining) left", icon: delta > 0 ? "plus.circle.fill" : "minus.circle.fill")
+            } catch {
+                toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.circle.fill")
+            }
+        }
     }
 
     private func addPackage(_ client: Client) {
         let count = Int(countText) ?? 0
         let price = Double(priceText) ?? 0
         guard count > 0 else { return }
-        clientStore.adjustSessions(by: count, for: client.id)
-        let entry = LedgerEntry(
-            date: Date(),
-            title: "Package Added",
-            delta: count,
-            amount: price,
-            kind: .packageAdded
-        )
-        profile.addLedgerEntry(entry, for: client.id)
-        toast = ToastData(message: "Added \(count) sessions", icon: "plus.circle.fill")
+        Task { @MainActor in
+            guard let token = AuthStore.accessToken else { return }
+            do {
+                let event = try await VerraAPI.createFinancialEvent(
+                    VerraAPI.CreateFinancialEventBody(
+                        clientID: client.id,
+                        kind: "income",
+                        title: "Package Added",
+                        detail: "Package Added",
+                        amount: price > 0 ? price : nil,
+                        sessionDelta: count
+                    ),
+                    accessToken: token
+                )
+                if let dto = try? await VerraAPI.fetchClients(accessToken: token).first(where: { $0.id == client.id }) {
+                    clientStore.applyClientDTO(dto)
+                }
+                let entry = LedgerEntry(
+                    id: event.id,
+                    date: event.occurredAt,
+                    title: event.title,
+                    delta: event.sessionDelta,
+                    amount: event.amount,
+                    kind: .packageAdded
+                )
+                profile.addLedgerEntry(entry, for: client.id)
+                toast = ToastData(message: "Added \(count) sessions", icon: "plus.circle.fill")
+            } catch {
+                toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.circle.fill")
+            }
+        }
     }
 }

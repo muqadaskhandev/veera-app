@@ -21,6 +21,7 @@ struct RootView: View {
 
     @AppStorage("verra.onboarded.trainer") private var onboardedTrainer = false
     @AppStorage("verra.onboarded.client") private var onboardedClient = false
+    @State private var subscription = SubscriptionStore()
 
     var body: some View {
         ZStack {
@@ -51,6 +52,7 @@ struct RootView: View {
                 .transition(.opacity)
             case .trainer:
                 ContentView(onLogOut: signOut)
+                    .environment(subscription)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             case .client:
                 ClientRootView(onLogOut: signOut)
