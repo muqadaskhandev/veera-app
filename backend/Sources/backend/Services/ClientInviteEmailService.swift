@@ -14,6 +14,7 @@ struct CreateInviteRequest: Content {
     var weightKg: Int?
     var injuryHistory: String?
     var primaryGoal: String?
+    var goalWeightKg: Int?
     var skillLevel: String?
 }
 

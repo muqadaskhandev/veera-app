@@ -8,25 +8,19 @@ final class ChatWebSocketService {
 
     private var task: URLSessionWebSocketTask?
     private var receiveLoopTask: Task<Void, Never>?
+    private var accessToken: String?
 
     func connect(accessToken: String) {
         disconnect()
-
-        var components = URLComponents(url: APIConfig.baseURL, resolvingAgainstBaseURL: false)!
-        components.scheme = components.scheme == "https" ? "wss" : "ws"
-        components.path = "/ws/chat"
-        components.queryItems = [URLQueryItem(name: "token", value: accessToken)]
-
-        guard let url = components.url else { return }
-
-        task = URLSession.shared.webSocketTask(with: url)
-        task?.resume()
+        self.accessToken = accessToken
+        openSocket(accessToken: accessToken)
         receiveLoopTask = Task { await receiveLoop() }
     }
 
     func disconnect() {
         receiveLoopTask?.cancel()
         receiveLoopTask = nil
+        accessToken = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
     }
@@ -36,6 +30,18 @@ final class ChatWebSocketService {
         sendJSON(["type": type, "conversationID": conversationID.uuidString])
     }
 
+    private func openSocket(accessToken: String) {
+        var components = URLComponents(url: APIConfig.baseURL, resolvingAgainstBaseURL: false)!
+        components.scheme = components.scheme == "https" ? "wss" : "ws"
+        components.path = "/ws/chat"
+        components.queryItems = [URLQueryItem(name: "token", value: accessToken)]
+
+        guard let url = components.url else { return }
+
+        task = URLSession.shared.webSocketTask(with: url)
+        task?.resume()
+    }
+
     private func sendJSON(_ payload: [String: String]) {
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let text = String(data: data, encoding: .utf8) else { return }
@@ -43,9 +49,12 @@ final class ChatWebSocketService {
     }
 
     private func receiveLoop() async {
-        while !Task.isCancelled, let task {
+        var backoffSeconds: Double = 1
+        while !Task.isCancelled {
+            guard let task else { break }
             do {
                 let message = try await task.receive()
+                backoffSeconds = 1
                 switch message {
                 case .string(let text):
                     handle(text: text)
@@ -57,10 +66,13 @@ final class ChatWebSocketService {
                     break
                 }
             } catch {
-                if !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(2))
-                }
-                break
+                if Task.isCancelled { break }
+                self.task?.cancel(with: .goingAway, reason: nil)
+                self.task = nil
+                try? await Task.sleep(for: .seconds(backoffSeconds))
+                backoffSeconds = min(backoffSeconds * 2, 15)
+                guard !Task.isCancelled, let token = accessToken else { break }
+                openSocket(accessToken: token)
             }
         }
     }
@@ -79,13 +91,17 @@ extension APIClient {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
-            let value = try container.decode(String.self)
-            let withFractional = ISO8601DateFormatter()
-            withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = withFractional.date(from: value) { return date }
-            let withoutFractional = ISO8601DateFormatter()
-            withoutFractional.formatOptions = [.withInternetDateTime]
-            if let date = withoutFractional.date(from: value) { return date }
+            if let value = try? container.decode(String.self) {
+                let withFractional = ISO8601DateFormatter()
+                withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let date = withFractional.date(from: value) { return date }
+                let withoutFractional = ISO8601DateFormatter()
+                withoutFractional.formatOptions = [.withInternetDateTime]
+                if let date = withoutFractional.date(from: value) { return date }
+            }
+            if let value = try? container.decode(Double.self) {
+                return Date(timeIntervalSinceReferenceDate: value)
+            }
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date")
         }
         return try decoder.decode(T.self, from: data)

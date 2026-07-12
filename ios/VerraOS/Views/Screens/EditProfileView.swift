@@ -38,6 +38,7 @@ struct EditProfileView: View {
             .background(Theme.Color.background)
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)
+            .preferredColorScheme(.light)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

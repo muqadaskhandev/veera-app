@@ -335,8 +335,10 @@ private struct ClientNoteSheet: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.Color.inkMuted)
 
-                TextField("Add a note about \(name.firstWord)…", text: $draft, axis: .vertical)
+                TextField("", text: $draft, prompt: Text("Add a note about \(name.firstWord)…").foregroundStyle(Theme.Color.inkFaint), axis: .vertical)
                     .font(.system(size: 15.5, weight: .medium))
+                    .foregroundStyle(Theme.Color.ink)
+                    .tint(Theme.Color.ink)
                     .lineLimit(6...12)
                     .focused($focused)
                     .padding(Theme.Spacing.md)
@@ -348,6 +350,7 @@ private struct ClientNoteSheet: View {
             .padding(Theme.Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.Color.background)
+            .preferredColorScheme(.light)
             .navigationTitle("Notes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -403,6 +406,7 @@ private struct EditBiometricsSheet: View {
                 .padding(Theme.Spacing.md)
             }
             .background(Theme.Color.background)
+            .preferredColorScheme(.light)
             .navigationTitle("Edit Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -432,8 +436,10 @@ private struct EditBiometricsSheet: View {
 
     private func unitBox(text: Binding<String>, unit: String) -> some View {
         HStack {
-            TextField("—", text: text)
+            TextField("", text: text, prompt: Text("—").foregroundStyle(Theme.Color.inkFaint))
                 .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.Color.ink)
+                .tint(Theme.Color.ink)
                 .keyboardType(.numberPad)
             Text(unit)
                 .font(.system(size: 13, weight: .semibold))
@@ -453,8 +459,10 @@ private struct EditBiometricsSheet: View {
                 .tracking(0.9)
                 .foregroundStyle(Theme.Color.inkFaint)
             HStack {
-                TextField("—", text: text)
+                TextField("", text: text, prompt: Text("—").foregroundStyle(Theme.Color.inkFaint))
                     .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.Color.ink)
+                    .tint(Theme.Color.ink)
                     .keyboardType(.numberPad)
                 Text(unit)
                     .font(.system(size: 13, weight: .semibold))

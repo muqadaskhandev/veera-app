@@ -57,6 +57,7 @@ struct ChatThreadView: View {
             }
         }
         .background(Theme.Color.background)
+        .preferredColorScheme(.light)
         .toast($toast)
         .overlay {
             if let target = reactionTarget {
@@ -262,8 +263,10 @@ struct ChatThreadView: View {
                 cameraButton
 
                 HStack(alignment: .bottom, spacing: 8) {
-                    TextField("Message", text: $draft, axis: .vertical)
+                    TextField("", text: $draft, prompt: Text("Message").foregroundStyle(Theme.Color.inkFaint), axis: .vertical)
                         .font(.system(size: 15.5, weight: .medium))
+                        .foregroundStyle(Theme.Color.ink)
+                        .tint(Theme.Color.ink)
                         .lineLimit(1...5)
                         .padding(.leading, 4)
                         .onChange(of: draft) { _, value in
@@ -271,7 +274,7 @@ struct ChatThreadView: View {
                             store.sendTyping(conversationID: conversationID, isTyping: isTyping)
                         }
 
-                    if draft.trimmingCharacters(in: .whitespaces).isEmpty, !voiceRecorder.isRecording {
+                    if draft.trimmingCharacters(in: .whitespaces).isEmpty || voiceRecorder.isRecording {
                         micButton
                     }
                 }
@@ -280,7 +283,18 @@ struct ChatThreadView: View {
                 .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: 22))
                 .overlay(RoundedRectangle(cornerRadius: 22).stroke(Theme.Color.hairline, lineWidth: 1))
 
-                if !draft.trimmingCharacters(in: .whitespaces).isEmpty {
+                if voiceRecorder.isRecording {
+                    Button {
+                        Task { await stopVoiceRecording(send: true) }
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(Theme.Color.accentInk)
+                            .frame(width: 40, height: 40)
+                            .background(Theme.Color.accent, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                } else if !draft.trimmingCharacters(in: .whitespaces).isEmpty {
                     sendButton
                 }
             }
@@ -316,6 +330,27 @@ struct ChatThreadView: View {
                 Text(String(format: "0:%02d", voiceRecorder.elapsedSeconds))
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundStyle(Theme.Color.inkMuted)
+
+                Button {
+                    Task { await stopVoiceRecording(send: false) }
+                } label: {
+                    Text("Cancel")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.Color.inkMuted)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Task { await stopVoiceRecording(send: true) }
+                } label: {
+                    Text("Send")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Theme.Color.accentInk)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Theme.Color.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, Theme.Spacing.md)
@@ -627,50 +662,73 @@ private struct VoiceNoteBubble: View {
     let bubbleBackground: Color
     let isOutgoing: Bool
 
-    @State private var voicePlayer = ChatVoicePlayer.shared
     @State private var isLoading = false
+    @State private var isPlaying = false
+    @State private var progress: Double = 0
+    @State private var displaySeconds: Int
+    @State private var tickTask: Task<Void, Never>?
 
-    private var isPlaying: Bool {
-        voicePlayer.isPlaying(messageID: message.id)
+    init(message: Message, seconds: Int, bubbleBackground: Color, isOutgoing: Bool) {
+        self.message = message
+        self.seconds = seconds
+        self.bubbleBackground = bubbleBackground
+        self.isOutgoing = isOutgoing
+        _displaySeconds = State(initialValue: seconds)
     }
+
+    private var ink: Color { isOutgoing ? Theme.Color.accentInk : Theme.Color.ink }
+    private var muted: Color { isOutgoing ? Theme.Color.accentInk.opacity(0.8) : Theme.Color.inkMuted }
 
     var body: some View {
         Button {
             guard let path = message.attachmentURL else { return }
-            Task {
-                isLoading = true
-                _ = await voicePlayer.toggle(messageID: message.id, path: path)
-                isLoading = false
-            }
+            Task { await togglePlayback(path: path) }
         } label: {
-            HStack(spacing: 10) {
-                Group {
-                    if isLoading {
-                        ProgressView()
-                            .scaleEffect(0.85)
-                    } else {
-                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 14, weight: .bold))
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Group {
+                        if isLoading {
+                            ProgressView()
+                                .scaleEffect(0.85)
+                        } else {
+                            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 14, weight: .bold))
+                        }
+                    }
+                    .foregroundStyle(ink)
+                    .frame(width: 16)
+
+                    HStack(spacing: 2.5) {
+                        ForEach(0..<18, id: \.self) { i in
+                            Capsule()
+                                .fill(barColor(for: i))
+                                .frame(width: 2.5, height: waveformHeight(i))
+                        }
+                    }
+
+                    Text(String(format: "0:%02d", displaySeconds))
+                        .font(.system(size: 12.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(muted)
+                        .contentTransition(.numericText())
+
+                    if isOutgoing {
+                        MessageDeliveryIndicator(status: message.deliveryStatus, onAccentBackground: message.isOutgoing)
                     }
                 }
-                .foregroundStyle(isOutgoing ? Theme.Color.accentInk : Theme.Color.ink)
-                .frame(width: 16)
 
-                HStack(spacing: 2.5) {
-                    ForEach(0..<18, id: \.self) { i in
+                // Explicit progress track — always visible while playing.
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
                         Capsule()
-                            .fill((isOutgoing ? Theme.Color.accentInk : Theme.Color.inkMuted).opacity(isPlaying ? 1 : 0.7))
-                            .frame(width: 2.5, height: waveformHeight(i))
+                            .fill(ink.opacity(0.18))
+                            .frame(height: 3)
+                        Capsule()
+                            .fill(ink)
+                            .frame(width: max(3, geo.size.width * progress), height: 3)
                     }
                 }
-
-                Text(String(format: "0:%02d", seconds))
-                    .font(.system(size: 12.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(isOutgoing ? Theme.Color.accentInk.opacity(0.8) : Theme.Color.inkMuted)
-
-                if isOutgoing {
-                    MessageDeliveryIndicator(status: message.deliveryStatus, onAccentBackground: message.isOutgoing)
-                }
+                .frame(height: 3)
+                .opacity(isPlaying || progress > 0 ? 1 : 0.35)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
@@ -683,6 +741,55 @@ private struct VoiceNoteBubble: View {
         }
         .buttonStyle(.plain)
         .disabled(message.attachmentURL == nil)
+        .onDisappear { stopLocalTicker() }
+    }
+
+    @MainActor
+    private func togglePlayback(path: String) async {
+        isLoading = true
+        let started = await ChatVoicePlayer.shared.toggle(messageID: message.id, path: path)
+        isLoading = false
+        if started {
+            isPlaying = true
+            startLocalTicker()
+        } else {
+            stopLocalTicker()
+            isPlaying = false
+            progress = 0
+            displaySeconds = seconds
+        }
+    }
+
+    private func startLocalTicker() {
+        stopLocalTicker()
+        tickTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let player = ChatVoicePlayer.shared
+                let playing = player.isPlaying(messageID: message.id)
+                isPlaying = playing
+                if playing {
+                    progress = player.progress(for: message.id)
+                    displaySeconds = player.remainingSeconds(for: message.id, fallbackDuration: seconds)
+                } else {
+                    progress = 0
+                    displaySeconds = seconds
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+    }
+
+    private func stopLocalTicker() {
+        tickTask?.cancel()
+        tickTask = nil
+    }
+
+    private func barColor(for index: Int) -> Color {
+        let base = isOutgoing ? Theme.Color.accentInk : Theme.Color.inkMuted
+        guard isPlaying else { return base.opacity(0.7) }
+        let threshold = progress * 18
+        return Double(index) < threshold ? base : base.opacity(0.28)
     }
 
     private func waveformHeight(_ index: Int) -> CGFloat {

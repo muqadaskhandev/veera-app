@@ -5,6 +5,8 @@ extension Notification.Name {
     static let openChatConversation = Notification.Name("verra.openChatConversation")
     static let openScheduleTab = Notification.Name("verra.openScheduleTab")
     static let refreshNotifications = Notification.Name("verra.refreshNotifications")
+    /// Fired when a chat message arrives while the user is outside that thread.
+    static let incomingChatAlert = Notification.Name("verra.incomingChatAlert")
 }
 
 enum ChatNotificationRouter {
@@ -32,5 +34,39 @@ enum ChatNotificationRouter {
         }
 
         NotificationCenter.default.post(name: .refreshNotifications, object: nil)
+    }
+
+    static func alertCopy(senderName: String, kind: MessageKind) -> (title: String, body: String) {
+        let name = senderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let who = name.isEmpty ? "someone" : name
+        switch kind {
+        case .voice:
+            return ("Voice message", "You have a new voice message from \(who)")
+        case .photo:
+            return ("Image", "You have a new image from \(who)")
+        case .video:
+            return ("Video", "You have a new video from \(who)")
+        case .text:
+            return ("New message", "You have a new message from \(who)")
+        }
+    }
+
+    static func postIncomingChatAlert(title: String, body: String, conversationID: UUID? = nil) {
+        var info: [String: Any] = [
+            "title": title,
+            "body": body,
+        ]
+        if let conversationID {
+            info["conversationID"] = conversationID.uuidString
+        }
+        if title == "Sessions added" {
+            info["symbol"] = "checkmark.seal.fill"
+            info["tintHex"] = NSNumber(value: UInt(0x4FA85C))
+        }
+        NotificationCenter.default.post(
+            name: .incomingChatAlert,
+            object: nil,
+            userInfo: info
+        )
     }
 }

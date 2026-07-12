@@ -61,6 +61,7 @@ struct ClientEditDetailsSheet: View {
             }
             .background(Theme.Color.background)
             .navigationTitle("Edit Profile")
+            .preferredColorScheme(.light)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -112,8 +113,10 @@ struct ClientEditDetailsSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel(label)
             HStack {
-                TextField("—", text: text)
+                TextField("", text: text, prompt: Text("—").foregroundStyle(Theme.Color.inkFaint))
                     .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.Color.ink)
+                    .tint(Theme.Color.ink)
                     .keyboardType(.decimalPad)
                 Text(unit.short)
                     .font(.system(size: 13, weight: .semibold))
@@ -128,8 +131,10 @@ struct ClientEditDetailsSheet: View {
 
     private func unitBox(text: Binding<String>, unit: String) -> some View {
         HStack {
-            TextField("—", text: text)
+            TextField("", text: text, prompt: Text("—").foregroundStyle(Theme.Color.inkFaint))
                 .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.Color.ink)
+                .tint(Theme.Color.ink)
                 .keyboardType(.numberPad)
             Text(unit)
                 .font(.system(size: 13, weight: .semibold))

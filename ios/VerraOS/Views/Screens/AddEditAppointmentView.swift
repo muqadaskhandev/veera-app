@@ -168,6 +168,7 @@ struct AddEditAppointmentView: View {
             .background(Theme.Color.background)
             .navigationTitle(isEditing ? "Edit Appointment" : "New Appointment")
             .navigationBarTitleDisplayMode(.inline)
+            .preferredColorScheme(.light)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -279,6 +280,7 @@ struct AddEditAppointmentView: View {
                     .foregroundStyle(Theme.Color.inkFaint)
                 TextField("Search roster", text: $clientSearch)
                     .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Theme.Color.ink)
                     .autocorrectionDisabled()
             }
             .padding(.horizontal, Theme.Spacing.md)
@@ -365,6 +367,7 @@ struct AddEditAppointmentView: View {
             sectionLabel("Notes")
             TextField("Add session notes", text: $notes, axis: .vertical)
                 .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.Color.ink)
                 .lineLimit(3...6)
                 .padding(Theme.Spacing.md)
                 .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))

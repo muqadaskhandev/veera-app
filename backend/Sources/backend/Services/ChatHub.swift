@@ -11,6 +11,7 @@ struct ChatEvent: Codable, Sendable {
     var reaction: String?
     var userID: UUID?
     var isTyping: Bool?
+    var title: String?
     var preview: String?
     var isOnline: Bool?
     var lastSeen: Date?
@@ -55,7 +56,9 @@ actor ChatHub {
 
     func send(to userID: UUID, event: ChatEvent) async {
         guard let ids = userConnectionIDs[userID], !ids.isEmpty else { return }
-        guard let payload = try? JSONEncoder().encode(event),
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let payload = try? encoder.encode(event),
               let text = String(data: payload, encoding: .utf8) else { return }
 
         for connectionID in ids {

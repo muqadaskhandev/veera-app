@@ -72,6 +72,7 @@ struct ClientRootView: View {
     @State private var showingRedeemInvite = false
     @State private var showingNotifications = false
     @State private var showLogOutConfirm = false
+    @State private var incomingChatAlert: IncomingChatAlert?
 
     private var client: Client {
         account.client ?? Self.placeholderClient
@@ -134,6 +135,31 @@ struct ClientRootView: View {
 
             drawer
         }
+        .overlay(alignment: .top) {
+            if let incomingChatAlert, tab != .messages || incomingChatAlert.conversationID == nil {
+                InAppChatAlertBanner(
+                    title: incomingChatAlert.title,
+                    bodyText: incomingChatAlert.body,
+                    symbol: incomingChatAlert.symbol,
+                    tint: Color(hex: incomingChatAlert.tintHex),
+                    onTap: {
+                        let id = incomingChatAlert.conversationID
+                        self.incomingChatAlert = nil
+                        if let id {
+                            conversationID = id
+                            withAnimation(.easeInOut(duration: 0.2)) { tab = .messages }
+                        } else {
+                            showingNotifications = true
+                        }
+                    },
+                    onDismiss: { self.incomingChatAlert = nil }
+                )
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.86), value: incomingChatAlert?.title)
+        .preferredColorScheme(.light)
         .background(Theme.Color.ink.ignoresSafeArea())
         .environment(\.isReadOnly, true)
         .environment(app)
@@ -207,6 +233,40 @@ struct ClientRootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .refreshNotifications)) { _ in
             Task { await notifications.refreshFromServer() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .incomingChatAlert)) { notification in
+            guard let info = notification.userInfo,
+                  let title = info["title"] as? String,
+                  let pushBody = info["body"] as? String else { return }
+            let conversationID = (info["conversationID"] as? String).flatMap(UUID.init(uuidString:))
+            // Hide chat banners while already in Messages; still show account alerts (e.g. sessions).
+            if conversationID != nil, tab == .messages { return }
+            let body: String = {
+                guard conversationID != nil else { return pushBody }
+                switch title {
+                case "Voice message": return "You have a new voice message from \(coachName)"
+                case "Image": return "You have a new image from \(coachName)"
+                case "Video": return "You have a new video from \(coachName)"
+                default: return "You have a new message from \(coachName)"
+                }
+            }()
+            let symbol = info["symbol"] as? String ?? "bubble.left.fill"
+            let tintHex = (info["tintHex"] as? NSNumber)?.uintValue ?? 0x3D7FE8
+            notifications.prependMessageAlert(title: title, detail: body)
+            let alert = IncomingChatAlert(
+                title: title,
+                body: body,
+                conversationID: conversationID,
+                symbol: symbol,
+                tintHex: tintHex
+            )
+            incomingChatAlert = alert
+            Task {
+                try? await Task.sleep(for: .seconds(4))
+                if incomingChatAlert == alert {
+                    incomingChatAlert = nil
+                }
+            }
         }
     }
 
@@ -465,6 +525,7 @@ private struct ClientTabItem: View {
                     if badgeCount > 0 {
                         UnreadCountBadge(count: badgeCount, compact: true)
                             .offset(x: 14, y: -10)
+                            .transaction { $0.animation = nil }
                     }
                 }
                 .frame(height: 32)

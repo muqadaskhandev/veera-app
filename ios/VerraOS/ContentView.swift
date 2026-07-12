@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var showingEditProfile = false
     @State private var showingHelp = false
     @State private var showLogOutConfirm = false
+    @State private var incomingChatAlert: IncomingChatAlert?
     @Environment(SubscriptionStore.self) private var subscription
 
     /// Public legal page opened from the drawer's Legal row.
@@ -52,6 +53,30 @@ struct ContentView: View {
 
             drawer
         }
+        .overlay(alignment: .top) {
+            if let incomingChatAlert {
+                InAppChatAlertBanner(
+                    title: incomingChatAlert.title,
+                    bodyText: incomingChatAlert.body,
+                    symbol: incomingChatAlert.symbol,
+                    tint: Color(hex: incomingChatAlert.tintHex),
+                    onTap: {
+                        let id = incomingChatAlert.conversationID
+                        self.incomingChatAlert = nil
+                        if let id {
+                            app.openChat(conversationID: id)
+                        } else {
+                            showingNotifications = true
+                        }
+                    },
+                    onDismiss: { self.incomingChatAlert = nil }
+                )
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.86), value: incomingChatAlert?.title)
+        .preferredColorScheme(.light)
         .overlay {
             if subscription.needsPaywall {
                 BillingView(isPaywall: true, onBack: onLogOut)
@@ -133,6 +158,7 @@ struct ContentView: View {
             }
             if let token = AuthStore.accessToken {
                 await messages.start(accessToken: token)
+                await ChatPushService.registerIfNeeded()
                 if let summary = try? await VerraAPI.fetchFinancialSummary(filter: "all", accessToken: token) {
                     PlatformLoader.applyFinancialEvents(summary.events, clients: clients.clients, to: profile)
                 }
@@ -144,6 +170,29 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .refreshNotifications)) { _ in
             Task { await notifications.refreshFromServer() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .incomingChatAlert)) { notification in
+            guard let info = notification.userInfo,
+                  let title = info["title"] as? String,
+                  let body = info["body"] as? String else { return }
+            let conversationID = (info["conversationID"] as? String).flatMap(UUID.init(uuidString:))
+            let symbol = info["symbol"] as? String ?? "bubble.left.fill"
+            let tintHex = (info["tintHex"] as? NSNumber)?.uintValue ?? 0x3D7FE8
+            notifications.prependMessageAlert(title: title, detail: body)
+            let alert = IncomingChatAlert(
+                title: title,
+                body: body,
+                conversationID: conversationID,
+                symbol: symbol,
+                tintHex: tintHex
+            )
+            incomingChatAlert = alert
+            Task {
+                try? await Task.sleep(for: .seconds(4))
+                if incomingChatAlert == alert {
+                    incomingChatAlert = nil
+                }
+            }
         }
         .onDisappear {
             messages.stop()
@@ -158,7 +207,7 @@ struct ContentView: View {
             TopHeader(
                 title: app.selectedTab.title,
                 hasUnread: notifications.hasUnread,
-                showsControls: app.selectedTab == .schedule,
+                showsControls: true,
                 onMenu: { app.openDrawer() },
                 onBell: {
                     showingNotifications = true

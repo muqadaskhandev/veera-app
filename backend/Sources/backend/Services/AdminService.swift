@@ -500,6 +500,7 @@ enum AdminService {
             weightKg: payload.weightKg,
             injuryHistory: payload.injuryHistory,
             primaryGoal: payload.primaryGoal,
+            goalWeightKg: payload.goalWeightKg,
             skillLevel: payload.skillLevel
         )
 
@@ -666,6 +667,7 @@ struct AdminCreateInviteRequest: Content {
     var weightKg: Int?
     var injuryHistory: String?
     var primaryGoal: String?
+    var goalWeightKg: Int?
     var skillLevel: String?
 }
 

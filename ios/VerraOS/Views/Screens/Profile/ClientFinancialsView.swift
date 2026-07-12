@@ -58,6 +58,7 @@ struct ClientFinancialsView: View {
             }
         }
         .background(Theme.Color.background)
+        .preferredColorScheme(.light)
         .toast($toast)
         .task {
             await refreshFinancials()
@@ -303,6 +304,7 @@ struct ClientFinancialsView: View {
                 }
                 TextField("0", text: text)
                     .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.Color.ink)
                     .keyboardType(.numberPad)
             }
             .padding(.horizontal, 13).padding(.vertical, 11)

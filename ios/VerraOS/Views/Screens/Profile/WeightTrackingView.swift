@@ -311,6 +311,7 @@ private struct LogWeightSheet: View {
                 HStack(spacing: 8) {
                     TextField("0.0", text: $text)
                         .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.Color.ink)
                         .keyboardType(.decimalPad)
                     Text(unit.short)
                         .font(.system(size: 18, weight: .semibold))
@@ -414,6 +415,7 @@ private struct WeightDetailsSheet: View {
             Spacer()
             TextField("0.0", text: text)
                 .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(Theme.Color.ink)
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
                 .frame(width: 90)

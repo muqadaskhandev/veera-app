@@ -63,6 +63,7 @@ enum InviteService {
             gender: payload.gender ?? "",
             heightCm: payload.heightCm,
             weightKg: payload.weightKg,
+            goalWeightKg: payload.goalWeightKg,
             injuryHistory: payload.injuryHistory ?? "",
             primaryGoal: payload.primaryGoal ?? "",
             skillLevel: payload.skillLevel ?? ""

@@ -100,7 +100,8 @@ enum FinancialService {
             )
         }
 
-        if payload.kind == "income", delta > 0, let clientUserID = client.$user.id {
+        // Notify the client whenever sessions are credited (package or manual +).
+        if delta > 0, let clientUserID = client.$user.id {
             let sessionLabel = delta == 1 ? "1 session" : "\(delta) sessions"
             var body = "Your trainer added \(sessionLabel) to your account."
             if let amount = payload.amount {
@@ -109,12 +110,20 @@ enum FinancialService {
             await UserNotificationDeliveryService.deliver(
                 to: clientUserID,
                 topic: .activity,
-                category: "payment",
+                category: payload.kind == "income" ? "payment" : "activity",
                 title: "Sessions added",
                 body: body,
                 pushKind: .paymentLogged,
                 on: database,
                 app: app
+            )
+            await ChatHub.shared.send(
+                to: clientUserID,
+                event: ChatEvent(
+                    type: "notification.new",
+                    title: "Sessions added",
+                    preview: body
+                )
             )
         }
 

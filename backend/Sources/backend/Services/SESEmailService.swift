@@ -26,7 +26,7 @@ enum SESEmailService {
                 credentials: .init(
                     accessKeyID: accessKey,
                     secretAccessKey: secretKey,
-                    sessionToken: Environment.get("AWS_SESSION_TOKEN")
+                    sessionToken: Environment.get("AWS_SESSION_TOKEN").flatMap { $0.isEmpty ? nil : $0 }
                 )
             )
         }
@@ -99,7 +99,7 @@ enum SESEmailService {
             clientRequest.headers.replaceOrAdd(name: .init("host"), value: endpoint.host!)
             clientRequest.headers.replaceOrAdd(name: .init("x-amz-date"), value: signed.amzDate)
             clientRequest.headers.replaceOrAdd(name: .init("authorization"), value: signed.authorization)
-            if let sessionToken = config.credentials.sessionToken {
+            if let sessionToken = config.credentials.sessionToken, !sessionToken.isEmpty {
                 clientRequest.headers.replaceOrAdd(name: .init("x-amz-security-token"), value: sessionToken)
             }
             var buffer = ByteBuffer()

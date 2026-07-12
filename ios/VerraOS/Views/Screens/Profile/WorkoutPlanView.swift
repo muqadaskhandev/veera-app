@@ -474,6 +474,7 @@ struct WorkoutPlanView: View {
                         .foregroundStyle(Theme.Color.inkFaint)
                     TextField("Search exercises", text: $exerciseSearch)
                         .font(.system(size: 14.5, weight: .medium))
+                        .foregroundStyle(Theme.Color.ink)
                         .autocorrectionDisabled()
                     Button {
                         exerciseSearch = ""
@@ -640,6 +641,7 @@ struct WorkoutPlanView: View {
             VStack(alignment: .leading, spacing: 12) {
                 TextField("Post-workout notes (e.g. focused on squat form, knee flare-up)…", text: notes, axis: .vertical)
                     .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Theme.Color.ink)
                     .lineLimit(5...12)
                     .padding(Theme.Spacing.sm)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -951,6 +953,7 @@ private struct BuilderItemRow: View {
     private func field(placeholder: String, text: Binding<String>) -> some View {
         TextField(placeholder, text: text)
             .font(.system(size: 14, weight: .bold, design: .rounded))
+            .foregroundStyle(Theme.Color.ink)
             .multilineTextAlignment(.center)
             .keyboardType(.numberPad)
             .frame(width: 46)
@@ -1008,6 +1011,7 @@ private struct ExerciseEditorSheet: View {
                 fieldLabel(isHeader ? "Section name" : "Exercise name")
                 TextField(isHeader ? "e.g. Warm-up" : "e.g. Bench Press", text: $name)
                     .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.Color.ink)
                     .padding(Theme.Spacing.sm)
                     .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
 
@@ -1017,6 +1021,7 @@ private struct ExerciseEditorSheet: View {
                             fieldLabel("Sets (optional)")
                             TextField("—", text: $setsText)
                                 .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundStyle(Theme.Color.ink)
                                 .keyboardType(.numberPad)
                                 .padding(Theme.Spacing.sm)
                                 .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
@@ -1025,6 +1030,7 @@ private struct ExerciseEditorSheet: View {
                             fieldLabel("Reps (optional)")
                             TextField("—", text: $repsText)
                                 .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundStyle(Theme.Color.ink)
                                 .keyboardType(.numberPad)
                                 .padding(Theme.Spacing.sm)
                                 .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))

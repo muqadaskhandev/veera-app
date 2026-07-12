@@ -103,6 +103,18 @@ final class NotificationStore {
         notifications.removeAll { $0.id == id }
     }
 
+    /// Immediately surfaces a chat alert in the bell feed (before the server round-trip).
+    func prependMessageAlert(title: String, detail: String) {
+        let alert = AppNotification(
+            category: .newMessage,
+            title: title,
+            detail: detail,
+            minutesAgo: 0,
+            isRead: false
+        )
+        notifications.insert(alert, at: 0)
+    }
+
     // MARK: Seed
 
     static func seed() -> [AppNotification] {

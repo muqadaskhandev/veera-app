@@ -47,6 +47,7 @@ struct ChatEventDTO: Codable {
     let reaction: String?
     let userID: UUID?
     let isTyping: Bool?
+    let title: String?
     let preview: String?
     let isOnline: Bool?
     let lastSeen: Date?

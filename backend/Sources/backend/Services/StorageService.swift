@@ -92,7 +92,7 @@ enum StorageService {
             credentials: .init(
                 accessKeyID: accessKey,
                 secretAccessKey: secretKey,
-                sessionToken: Environment.get("AWS_SESSION_TOKEN")
+                sessionToken: Environment.get("AWS_SESSION_TOKEN").flatMap { $0.isEmpty ? nil : $0 }
             )
         )
 
@@ -128,7 +128,7 @@ enum StorageService {
             credentials: .init(
                 accessKeyID: accessKey,
                 secretAccessKey: secretKey,
-                sessionToken: Environment.get("AWS_SESSION_TOKEN")
+                sessionToken: Environment.get("AWS_SESSION_TOKEN").flatMap { $0.isEmpty ? nil : $0 }
             )
         )
 

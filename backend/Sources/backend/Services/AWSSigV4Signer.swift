@@ -28,7 +28,7 @@ enum AWSSigV4Signer {
         }
         signedHeaders["host"] = url.host?.lowercased()
         signedHeaders["x-amz-date"] = amzDate
-        if let sessionToken = credentials.sessionToken {
+        if let sessionToken = credentials.sessionToken, !sessionToken.isEmpty {
             signedHeaders["x-amz-security-token"] = sessionToken
         }
 

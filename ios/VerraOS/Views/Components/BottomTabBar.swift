@@ -64,6 +64,7 @@ private struct TabItem: View {
                     if badgeCount > 0 {
                         UnreadCountBadge(count: badgeCount, compact: true)
                             .offset(x: 14, y: -10)
+                            .transaction { $0.animation = nil }
                     }
                 }
                 .frame(height: 32)

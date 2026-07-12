@@ -471,6 +471,7 @@ enum VerraAPI {
         let weightKg: Int?
         let injuryHistory: String?
         let primaryGoal: String?
+        let goalWeightKg: Int?
         let skillLevel: String?
     }
 
@@ -508,6 +509,7 @@ enum VerraAPI {
         weightKg: Int? = nil,
         injuryHistory: String? = nil,
         primaryGoal: String? = nil,
+        goalWeightKg: Int? = nil,
         skillLevel: String? = nil,
         expiresInDays: Int? = 30,
         accessToken: String
@@ -527,6 +529,7 @@ enum VerraAPI {
                 weightKg: weightKg,
                 injuryHistory: injuryHistory,
                 primaryGoal: primaryGoal,
+                goalWeightKg: goalWeightKg,
                 skillLevel: skillLevel
             ),
             token: accessToken

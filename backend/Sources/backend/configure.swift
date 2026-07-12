@@ -73,6 +73,10 @@ func configure(_ app: Application) async throws {
 
     try await app.autoMigrate()
 
+    // Idempotent — fills empty exercise library / client workout plans after DB resets.
+    try await MigrationSupport.seedExercisesIfNeeded(on: app.db)
+    try await MigrationSupport.seedSampleWorkoutsIfNeeded(on: app.db)
+
     if SESEmailService.isConfigured() {
         app.logger.info("Amazon SES email delivery is enabled")
     } else if app.environment == .development {

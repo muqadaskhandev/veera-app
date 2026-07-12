@@ -28,6 +28,7 @@ struct MessagesView: View {
                 Theme.Color.background.ignoresSafeArea()
                 content
             }
+            .preferredColorScheme(.light)
             .overlay(alignment: .bottomTrailing) { newButton }
             .navigationBarHidden(true)
             .navigationDestination(for: Conversation.self) { convo in
@@ -143,8 +144,10 @@ struct MessagesView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Theme.Color.inkFaint)
-            TextField("Search by name", text: $search)
+            TextField("", text: $search, prompt: Text("Search by name").foregroundStyle(Theme.Color.inkFaint))
                 .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.Color.ink)
+                .tint(Theme.Color.ink)
                 .autocorrectionDisabled()
             if !search.isEmpty {
                 Button { search = "" } label: {
@@ -257,8 +260,10 @@ private struct NewMessageSheet: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Theme.Color.inkFaint)
-                    TextField("Search roster", text: $search)
+                    TextField("", text: $search, prompt: Text("Search roster").foregroundStyle(Theme.Color.inkFaint))
                         .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Theme.Color.ink)
+                        .tint(Theme.Color.ink)
                         .autocorrectionDisabled()
                 }
                 .padding(.horizontal, Theme.Spacing.md)

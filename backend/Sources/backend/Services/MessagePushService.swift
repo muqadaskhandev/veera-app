@@ -34,8 +34,8 @@ enum MessagePushService {
         conversationID: UUID,
         on app: Application
     ) async {
-        let isOnline = await ChatHub.shared.isUserOnline(userID)
-
+        // Always attempt APNs so backgrounded recipients still get a push even if
+        // their WebSocket is technically still connected.
         await UserNotificationDeliveryService.deliver(
             to: userID,
             topic: .message,
@@ -45,19 +45,10 @@ enum MessagePushService {
             pushKind: .chatMessage,
             metadataJSON: encodeConversationMetadata(conversationID),
             conversationID: conversationID,
-            includePush: !isOnline,
+            includePush: true,
             on: app.db,
             app: app
         )
-
-        if isOnline {
-            let event = ChatEvent(
-                type: "push.notification",
-                conversationID: conversationID,
-                preview: body
-            )
-            await ChatHub.shared.send(to: userID, event: event)
-        }
     }
 
     private static func encodeConversationMetadata(_ conversationID: UUID) -> String? {

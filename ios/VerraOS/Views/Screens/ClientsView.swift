@@ -166,6 +166,7 @@ struct ClientsView: View {
                 .foregroundStyle(Theme.Color.inkFaint)
             TextField("Search clients", text: $search)
                 .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.Color.ink)
                 .autocorrectionDisabled()
             if !search.isEmpty {
                 Button { search = "" } label: {

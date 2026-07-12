@@ -1,31 +1,31 @@
 import Foundation
 
 /// Resumes a checked continuation at most once (prevents fatal continuation misuse crashes).
-final class SingleResumeBox<T, E: Error> {
-    private var continuation: CheckedContinuation<T, E>?
+///
+/// Uses a locked one-shot handler instead of storing `CheckedContinuation` directly.
+/// Holding the continuation in a generic class deinit crashes Swift 6.3’s Release
+/// optimizer (`EarlyPerfInliner`).
+nonisolated final class SingleResumeBox<T, E: Error>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: ((Result<T, E>) -> Void)?
 
     init(_ continuation: CheckedContinuation<T, E>) {
-        self.continuation = continuation
+        handler = { continuation.resume(with: $0) }
     }
 
     func resume(returning value: T) {
-        guard let continuation else { return }
-        self.continuation = nil
-        continuation.resume(returning: value)
+        resume(with: .success(value))
     }
 
     func resume(throwing error: E) {
-        guard let continuation else { return }
-        self.continuation = nil
-        continuation.resume(throwing: error)
+        resume(with: .failure(error))
     }
 
     func resume(with result: Result<T, E>) {
-        switch result {
-        case .success(let value):
-            resume(returning: value)
-        case .failure(let error):
-            resume(throwing: error)
-        }
+        lock.lock()
+        let handler = self.handler
+        self.handler = nil
+        lock.unlock()
+        handler?(result)
     }
 }

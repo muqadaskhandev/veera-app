@@ -15,13 +15,16 @@ final class MessageStore {
 
     private var pollTask: Task<Void, Never>?
     private var activeConversationID: UUID?
+    /// Bumped on local unread changes so an in-flight poll can't wipe a newer WS update.
+    private var inboxEpoch = 0
 
     init(conversations: [Conversation] = []) {
         self.conversations = conversations
     }
 
+    /// Total unread messages across the inbox (local tallies; server only stores a boolean flag).
     var unreadCount: Int {
-        conversations.reduce(0) { $0 + $1.unreadMessageCount }
+        conversations.reduce(0) { $0 + max(0, $1.unreadMessageCount) }
     }
 
     /// Search by client name; sorted most-recent first.
@@ -65,17 +68,32 @@ final class MessageStore {
     @MainActor
     func refreshFromServer() async {
         guard let token = AuthStore.accessToken else { return }
+        let epochAtStart = inboxEpoch
         do {
             let dtos = try await VerraAPI.fetchConversations(accessToken: token)
+            // A live unread/read change happened while this request was in flight — drop stale snapshot.
+            guard epochAtStart == inboxEpoch else { return }
+
             var merged: [Conversation] = []
             for dto in dtos {
                 if let existing = conversations.first(where: { $0.id == dto.id }) {
-                    let unreadCount = dto.isUnread ? max(existing.unreadMessageCount, 1) : 0
-                    let convo = MessageLoader.conversation(
+                    // Server only has a boolean; keep the local tally while still unread.
+                    let unreadCount: Int
+                    if dto.isUnread {
+                        unreadCount = max(existing.unreadMessageCount, 1)
+                    } else {
+                        unreadCount = 0
+                    }
+                    var convo = MessageLoader.conversation(
                         from: dto,
                         messages: existing.messages,
                         unreadMessageCount: unreadCount
                     )
+                    convo.isUnread = unreadCount > 0
+                    if existing.otherParticipantIsOnline, !convo.otherParticipantIsOnline {
+                        convo.otherParticipantIsOnline = true
+                        convo.otherParticipantLastSeen = nil
+                    }
                     merged.append(convo)
                 } else {
                     merged.append(MessageLoader.conversation(from: dto))
@@ -255,24 +273,34 @@ final class MessageStore {
         switch event.type {
         case "message.new":
             guard let dto = event.message else { return }
-            append(MessageLoader.message(from: dto), to: dto.conversationID)
+            let wasNew = append(MessageLoader.message(from: dto), to: dto.conversationID)
             updatePreview(for: dto.conversationID, preview: dto.body, at: dto.createdAt ?? .now)
-            if !dto.isOutgoing {
+            if wasNew, !dto.isOutgoing {
                 if dto.conversationID == activeConversationID {
                     Task { await acknowledgeRead(conversationID: dto.conversationID) }
                 } else {
                     markUnread(dto.conversationID)
                     Task { await acknowledgeDelivered(conversationID: dto.conversationID) }
+                    let senderName = conversation(id: dto.conversationID)?.clientName ?? ""
+                    let kind = MessageLoader.message(from: dto).kind
+                    let copy = ChatNotificationRouter.alertCopy(senderName: senderName, kind: kind)
                     ChatPushService.showLocalNotification(
-                        title: conversation(id: dto.conversationID)?.clientName ?? "New message",
-                        body: event.preview ?? dto.body,
+                        title: copy.title,
+                        body: copy.body,
                         conversationID: dto.conversationID
                     )
+                    ChatNotificationRouter.postIncomingChatAlert(
+                        title: copy.title,
+                        body: copy.body,
+                        conversationID: dto.conversationID
+                    )
+                    NotificationCenter.default.post(name: .refreshNotifications, object: nil)
                 }
             }
         case "conversation.read":
+            // The *other* participant read the thread — update our outgoing ticks only.
+            // Do NOT clear our inbox unread badge.
             if let id = event.conversationID {
-                markReadLocal(id)
                 markOutgoingMessagesRead(in: id)
             }
         case "message.status":
@@ -289,11 +317,6 @@ final class MessageStore {
             if let id = event.conversationID { typingConversationIDs.insert(id) }
         case "typing.stop":
             if let id = event.conversationID { typingConversationIDs.remove(id) }
-        case "conversation.read":
-            if let id = event.conversationID {
-                markReadLocal(id)
-                markOutgoingMessagesRead(in: id)
-            }
         case "presence.update":
             guard let userID = event.userID else { break }
             applyPresence(
@@ -306,6 +329,13 @@ final class MessageStore {
             for state in states {
                 applyPresence(userID: state.userID, isOnline: state.isOnline, lastSeen: state.lastSeen)
             }
+        case "notification.new":
+            let title = event.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let body = event.preview?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let title, !title.isEmpty, let body, !body.isEmpty else { break }
+            ChatPushService.showLocalNotification(title: title, body: body)
+            ChatNotificationRouter.postIncomingChatAlert(title: title, body: body)
+            NotificationCenter.default.post(name: .refreshNotifications, object: nil)
         default:
             break
         }
@@ -321,27 +351,34 @@ final class MessageStore {
     }
 
     @MainActor
-    private func append(_ message: Message, to conversationID: UUID) {
+    @discardableResult
+    private func append(_ message: Message, to conversationID: UUID) -> Bool {
+        var inserted = false
         updateMessages(in: conversationID) { messages in
             guard !messages.contains(where: { $0.id == message.id }) else { return }
             messages.append(message)
+            inserted = true
         }
-        if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+        if inserted, let index = conversations.firstIndex(where: { $0.id == conversationID }) {
             conversations[index].lastActiveAt = message.sentAt
         }
+        return inserted
     }
 
     @MainActor
     private func applyMessages(_ messages: [Message], to conversationID: UUID) {
         guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
-        let existing = Dictionary(uniqueKeysWithValues: conversations[index].messages.map { ($0.id, $0.deliveryStatus) })
-        var merged = messages.sorted { $0.sentAt < $1.sentAt }
-        for i in merged.indices where merged[i].isOutgoing {
-            if let cached = existing[merged[i].id] {
-                merged[i].deliveryStatus = maxDeliveryStatus(cached, merged[i].deliveryStatus)
+        let previous = conversations[index].messages
+        let existingStatus = Dictionary(uniqueKeysWithValues: previous.map { ($0.id, $0.deliveryStatus) })
+        var byID = Dictionary(uniqueKeysWithValues: previous.map { ($0.id, $0) })
+        for message in messages {
+            var next = message
+            if next.isOutgoing, let cached = existingStatus[next.id] {
+                next.deliveryStatus = maxDeliveryStatus(cached, next.deliveryStatus)
             }
+            byID[next.id] = next
         }
-        conversations[index].messages = merged
+        conversations[index].messages = byID.values.sorted { $0.sentAt < $1.sentAt }
     }
 
     @MainActor
@@ -407,6 +444,7 @@ final class MessageStore {
     @MainActor
     private func markReadLocal(_ id: UUID) {
         guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        inboxEpoch += 1
         conversations[index].isUnread = false
         conversations[index].unreadMessageCount = 0
     }
@@ -414,6 +452,7 @@ final class MessageStore {
     @MainActor
     private func markUnread(_ id: UUID) {
         guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        inboxEpoch += 1
         conversations[index].isUnread = true
         conversations[index].unreadMessageCount += 1
     }
@@ -446,13 +485,25 @@ final class MessageStore {
         pollTask?.cancel()
         pollTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(12))
                 guard !Task.isCancelled else { break }
                 await refreshFromServer()
+                // Soft-refresh the open thread only — don't re-mark-read every poll.
                 if let activeConversationID {
-                    await loadMessages(for: activeConversationID)
+                    await softReloadMessages(for: activeConversationID)
                 }
             }
+        }
+    }
+
+    @MainActor
+    private func softReloadMessages(for conversationID: UUID) async {
+        guard let token = AuthStore.accessToken else { return }
+        do {
+            let page = try await VerraAPI.fetchMessages(conversationID: conversationID, accessToken: token)
+            applyMessages(page.messages.map(MessageLoader.message(from:)), to: conversationID)
+        } catch {
+            // Keep existing thread content.
         }
     }
 }

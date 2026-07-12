@@ -245,14 +245,23 @@ enum ConversationService {
 
         let dto = try MessageDTO(from: message, viewerUserID: userID)
 
-        let event = ChatEvent(type: "message.new", message: dto, conversationID: conversationID)
-        await ChatHub.shared.send(toUserIDs: recipients, event: event)
+        // Broadcast a recipient-scoped DTO so clients see the message as incoming.
+        for recipient in recipients {
+            let recipientDTO = try MessageDTO(from: message, viewerUserID: recipient)
+            let event = ChatEvent(type: "message.new", message: recipientDTO, conversationID: conversationID)
+            await ChatHub.shared.send(to: recipient, event: event)
+        }
+
+        let senderTitle = user.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? (role == .trainer ? "Your trainer" : conversation.clientName)
+            : user.displayName
+        let pushBody = conversation.lastMessagePreview ?? "New message"
 
         for recipient in recipients {
             await MessagePushService.notifyNewMessage(
                 to: recipient,
-                title: conversation.clientName,
-                body: conversation.lastMessagePreview ?? "New message",
+                title: senderTitle,
+                body: pushBody,
                 conversationID: conversationID,
                 on: app
             )

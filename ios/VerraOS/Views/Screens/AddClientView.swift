@@ -26,8 +26,8 @@ struct AddClientView: View {
     @State private var gender: String = ""
     @State private var height: String = ""
     @State private var weight: String = ""
+    @State private var goalWeight: String = ""
     @State private var injuries: String = ""
-    @State private var goal: String = ""
     @State private var skill: String = "Beginner"
     @State private var sessionBalance: Int = 8
     @State private var isInviting = false
@@ -53,6 +53,7 @@ struct AddClientView: View {
                 .padding(.bottom, 40)
             }
             .background(Theme.Color.background)
+            .preferredColorScheme(.light)
             .navigationTitle("Add Client")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -146,7 +147,7 @@ struct AddClientView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 sectionLabel("Goals")
-                field("Primary goal (e.g. Fat Loss)", text: $goal)
+                field("Goal weight (\(unit.short))", text: $goalWeight).keyboardType(.decimalPad)
                 skillPicker
             }
 
@@ -214,12 +215,15 @@ struct AddClientView: View {
     private func field(_ placeholder: String, text: Binding<String>, axis: Bool = false) -> some View {
         Group {
             if axis {
-                TextField(placeholder, text: text, axis: .vertical).lineLimit(2...4)
+                TextField("", text: text, prompt: Text(placeholder).foregroundStyle(Theme.Color.inkFaint), axis: .vertical)
+                    .lineLimit(2...4)
             } else {
-                TextField(placeholder, text: text)
+                TextField("", text: text, prompt: Text(placeholder).foregroundStyle(Theme.Color.inkFaint))
             }
         }
         .font(.system(size: 16, weight: .medium))
+        .foregroundStyle(Theme.Color.ink)
+        .tint(Theme.Color.ink)
         .padding(Theme.Spacing.md)
         .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
@@ -258,7 +262,7 @@ struct AddClientView: View {
                     heightCm: preFill ? Int(height) : nil,
                     weightKg: preFill ? weightInKg : nil,
                     injuryHistory: preFill && !injuries.isEmpty ? injuries : nil,
-                    primaryGoal: preFill && !goal.isEmpty ? goal : nil,
+                    goalWeightKg: preFill ? goalWeightInKg : nil,
                     skillLevel: preFill ? skill : nil,
                     accessToken: token
                 )
@@ -297,6 +301,11 @@ struct AddClientView: View {
     /// Parses the entered weight (in the trainer's unit) and converts it to kg.
     private var weightInKg: Int? {
         guard let value = Double(weight.replacingOccurrences(of: ",", with: ".")), value > 0 else { return nil }
+        return Int(unit.toKg(value).rounded())
+    }
+
+    private var goalWeightInKg: Int? {
+        guard let value = Double(goalWeight.replacingOccurrences(of: ",", with: ".")), value > 0 else { return nil }
         return Int(unit.toKg(value).rounded())
     }
 
