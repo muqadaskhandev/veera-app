@@ -1217,6 +1217,60 @@ enum VerraAPI {
             token: accessToken
         )
     }
+
+    // MARK: - Payments (Stripe + Apple Pay)
+
+    struct PaymentConfigDTO: Decodable {
+        let configured: Bool
+        let publishableKey: String?
+        let merchantID: String?
+        let merchantCountryCode: String
+        let monthlyAmount: Int
+        let annualAmount: Int
+        let currency: String
+    }
+
+    struct CreatePaymentIntentBody: Encodable {
+        let productType: String
+        let plan: String?
+        let clientID: UUID?
+        let amount: Int?
+        let sessionCount: Int?
+        let currency: String?
+    }
+
+    struct PaymentIntentDTO: Decodable {
+        let clientSecret: String
+        let paymentIntentID: String
+        let amount: Int
+        let currency: String
+    }
+
+    struct PaymentStatusDTO: Decodable {
+        let paymentIntentID: String
+        let status: String
+        let fulfilled: Bool
+    }
+
+    static func fetchPaymentConfig(accessToken: String) async throws -> PaymentConfigDTO {
+        try await APIClient.shared.request("/api/payments/config", token: accessToken)
+    }
+
+    static func createPaymentIntent(_ body: CreatePaymentIntentBody, accessToken: String) async throws -> PaymentIntentDTO {
+        try await APIClient.shared.request(
+            "/api/payments/intent",
+            method: "POST",
+            body: body,
+            token: accessToken
+        )
+    }
+
+    static func fetchPaymentStatus(paymentIntentID: String, accessToken: String) async throws -> PaymentStatusDTO {
+        try await APIClient.shared.request(
+            "/api/payments/intent/\(paymentIntentID)",
+            token: accessToken
+        )
+    }
 }
 
 private struct EmptyResponse: Decodable {}

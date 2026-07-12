@@ -65,6 +65,7 @@ func configure(_ app: Application) async throws {
     app.migrations.add(AddExerciseLibraryFields())
     app.migrations.add(CreateNotificationOutbox())
     app.migrations.add(CreateGoogleCalendarTables())
+    app.migrations.add(CreateStripePayments())
     app.migrations.add(SeedDefaultTrainer())
     app.migrations.add(SeedDefaultAdmin())
 
@@ -92,6 +93,12 @@ func configure(_ app: Application) async throws {
         app.logger.info("Twilio SMS delivery is enabled")
     } else if app.environment == .development {
         app.logger.warning("Twilio is not configured — SMS messages are logged locally in development")
+    }
+
+    if StripeService.isConfigured() {
+        app.logger.info("Stripe payments are enabled")
+    } else if app.environment == .development {
+        app.logger.warning("Stripe is not configured — card and Apple Pay checkout will be unavailable")
     }
 
     try routes(app)

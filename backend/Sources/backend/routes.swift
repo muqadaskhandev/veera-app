@@ -22,6 +22,8 @@ func routes(_ app: Application) throws {
     try app.register(collection: NotificationController())
     try app.register(collection: ExerciseController())
     try app.register(collection: SubscriptionController())
+    try app.register(collection: PaymentController())
+    try app.register(collection: StripeWebhookController())
     try app.register(collection: AppStoreWebhookController())
     try app.register(collection: StorageController())
     try app.register(collection: NotificationWebhookController())

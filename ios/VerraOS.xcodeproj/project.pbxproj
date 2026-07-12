@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		05CF5DB030003A2200828F10 /* StripePaymentSheet in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D42E9EAD3100EA8BCF /* StripePaymentSheet */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		105FC58A2E9EAD3200EA8BCF /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -24,7 +28,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		05D797DC2FFD9696001F0A43 /* VerraSubscriptions.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = VerraSubscriptions.storekit; sourceTree = "<group>"; };
 		105FC57A2E9EAD3100EA8BCF /* VerraOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VerraOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5892E9EAD3200EA8BCF /* VerraOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VerraOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5932E9EAD3200EA8BCF /* VerraOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VerraOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -53,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				05CF5DB030003A2200828F10 /* StripePaymentSheet in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -76,7 +80,6 @@
 		105FC5712E9EAD3100EA8BCF = {
 			isa = PBXGroup;
 			children = (
-				05D797DC2FFD9696001F0A43 /* VerraSubscriptions.storekit */,
 				105FC57C2E9EAD3100EA8BCF /* VerraOS */,
 				105FC58C2E9EAD3200EA8BCF /* VerraOSTests */,
 				105FC5962E9EAD3200EA8BCF /* VerraOSUITests */,
@@ -114,6 +117,7 @@
 			);
 			name = VerraOS;
 			packageProductDependencies = (
+				A1B2C3D42E9EAD3100EA8BCF /* StripePaymentSheet */,
 			);
 			productName = VerraOS;
 			productReference = 105FC57A2E9EAD3100EA8BCF /* VerraOS.app */;
@@ -197,6 +201,9 @@
 			);
 			mainGroup = 105FC5712E9EAD3100EA8BCF;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A1B2C3D32E9EAD3100EA8BCF /* XCRemoteSwiftPackageReference "stripe-ios" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 105FC57B2E9EAD3100EA8BCF /* Products */;
 			projectDirPath = "";
@@ -606,6 +613,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A1B2C3D32E9EAD3100EA8BCF /* XCRemoteSwiftPackageReference "stripe-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stripe/stripe-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 24.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A1B2C3D42E9EAD3100EA8BCF /* StripePaymentSheet */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D32E9EAD3100EA8BCF /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripePaymentSheet;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 105FC5722E9EAD3100EA8BCF /* Project object */;
 }

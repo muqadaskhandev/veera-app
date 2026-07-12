@@ -124,7 +124,7 @@ enum SessionReminderScheduler {
         let tokens = (try? await PushTokenService.activeTokens(for: userID, on: database)) ?? []
 
         for token in tokens {
-            var outbox = NotificationOutbox(
+            let outbox = NotificationOutbox(
                 userID: userID,
                 channel: NotificationChannel.push.rawValue,
                 kind: NotificationDeliveryKind.sessionReminder.rawValue,

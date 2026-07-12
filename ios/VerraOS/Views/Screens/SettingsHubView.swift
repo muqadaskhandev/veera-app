@@ -97,7 +97,7 @@ struct SettingsHubView: View {
         }
         .task {
             await subscription.refreshFromServer()
-            await subscription.refreshEntitlements()
+            await subscription.loadPaymentConfig()
         }
     }
 
