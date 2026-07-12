@@ -7,8 +7,10 @@ import SwiftUI
 
 struct BillingView: View {
     let isPaywall: Bool
+    var onBack: (() -> Void)? = nil
 
     @Environment(SubscriptionStore.self) private var subscription
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedPlan: SubscriptionPlan = .annual
     @State private var isPurchasing = false
     @State private var errorMessage: String?
@@ -23,10 +25,13 @@ struct BillingView: View {
                     if subscription.hasActiveSubscription && !isPaywall {
                         activeCard
                     } else {
+                        features
                         planPicker
                         payButton
                     }
-                    features
+                    if subscription.hasActiveSubscription && !isPaywall {
+                        features
+                    }
                     if let errorMessage {
                         Text(errorMessage)
                             .font(.system(size: 14, weight: .medium))
@@ -36,14 +41,48 @@ struct BillingView: View {
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.md)
-                .padding(.top, isPaywall ? 56 : Theme.Spacing.lg)
+                .padding(.top, isPaywall ? 12 : Theme.Spacing.lg)
                 .padding(.bottom, 40)
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if isPaywall {
+                backBar
             }
         }
         .task {
             await subscription.loadPaymentConfig()
             await subscription.refreshFromServer()
         }
+    }
+
+    private var backBar: some View {
+        HStack {
+            Button {
+                if let onBack {
+                    onBack()
+                } else {
+                    dismiss()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Back")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+                .foregroundStyle(Theme.Color.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Spacer()
+        }
+        .padding(.horizontal, Theme.Spacing.sm)
+        .padding(.top, 4)
+        .padding(.bottom, 4)
+        .background(Theme.Color.background.opacity(0.96))
     }
 
     private var header: some View {
@@ -75,7 +114,12 @@ struct BillingView: View {
     }
 
     private var planPicker: some View {
-        VStack(spacing: Theme.Spacing.sm) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text("Choose billing")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.Color.inkMuted)
+                .textCase(.uppercase)
+                .tracking(0.4)
             ForEach(SubscriptionPlan.allCases) { plan in
                 planCard(plan)
             }
@@ -153,6 +197,11 @@ struct BillingView: View {
 
     private var features: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("Included with monthly & annual")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.Color.inkMuted)
+                .textCase(.uppercase)
+                .tracking(0.4)
             featureRow("calendar", "Schedule & calendar sync")
             featureRow("person.2.fill", "Unlimited clients")
             featureRow("message.fill", "Messaging & notifications")

@@ -54,7 +54,7 @@ struct ContentView: View {
         }
         .overlay {
             if subscription.needsPaywall {
-                BillingView(isPaywall: true)
+                BillingView(isPaywall: true, onBack: onLogOut)
                     .environment(subscription)
                     .transition(.opacity)
             }
