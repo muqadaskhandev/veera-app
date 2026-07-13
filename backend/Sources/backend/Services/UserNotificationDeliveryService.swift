@@ -72,6 +72,20 @@ enum UserNotificationDeliveryService {
             on: database
         )
 
+        // Live in-app banner + local notification while the app is open.
+        // Skip chat — `message.new` already drives that UX.
+        if topic != .message {
+            await ChatHub.shared.send(
+                to: userID,
+                event: ChatEvent(
+                    type: "notification.new",
+                    conversationID: conversationID,
+                    title: title,
+                    preview: body
+                )
+            )
+        }
+
         guard includePush, !isQuietHours(prefs) else { return }
 
         let tokens = (try? await PushTokenService.activeTokens(for: userID, on: database)) ?? []

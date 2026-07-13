@@ -62,9 +62,12 @@ struct ContentView: View {
                     tint: Color(hex: incomingChatAlert.tintHex),
                     onTap: {
                         let id = incomingChatAlert.conversationID
+                        let opensSchedule = incomingChatAlert.opensSchedule
                         self.incomingChatAlert = nil
                         if let id {
                             app.openChat(conversationID: id)
+                        } else if opensSchedule {
+                            NotificationCenter.default.post(name: .openScheduleTab, object: nil)
                         } else {
                             showingNotifications = true
                         }
@@ -178,11 +181,13 @@ struct ContentView: View {
             let conversationID = (info["conversationID"] as? String).flatMap(UUID.init(uuidString:))
             let symbol = info["symbol"] as? String ?? "bubble.left.fill"
             let tintHex = (info["tintHex"] as? NSNumber)?.uintValue ?? 0x3D7FE8
+            let opensSchedule = info["opensSchedule"] as? Bool ?? false
             notifications.prependMessageAlert(title: title, detail: body)
             let alert = IncomingChatAlert(
                 title: title,
                 body: body,
                 conversationID: conversationID,
+                opensSchedule: opensSchedule,
                 symbol: symbol,
                 tintHex: tintHex
             )

@@ -333,8 +333,12 @@ final class MessageStore {
             let title = event.title?.trimmingCharacters(in: .whitespacesAndNewlines)
             let body = event.preview?.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let title, !title.isEmpty, let body, !body.isEmpty else { break }
-            ChatPushService.showLocalNotification(title: title, body: body)
-            ChatNotificationRouter.postIncomingChatAlert(title: title, body: body)
+            let opensSchedule = [
+                "New session scheduled",
+                "Session cancelled",
+            ].contains(title)
+            ChatPushService.showLocalNotification(title: title, body: body, opensSchedule: opensSchedule)
+            ChatNotificationRouter.postIncomingChatAlert(title: title, body: body, opensSchedule: opensSchedule)
             NotificationCenter.default.post(name: .refreshNotifications, object: nil)
         default:
             break

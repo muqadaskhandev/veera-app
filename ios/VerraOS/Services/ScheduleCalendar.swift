@@ -29,19 +29,38 @@ enum ScheduleCalendar {
         return calendar.date(from: components)
     }
 
-    /// Sessions whose start falls on the same calendar day as `date`.
+    /// Sessions whose wall-clock day (in the session timezone) matches the
+    /// civil day the user tapped on the strip (in the viewer calendar).
     static func sessions(_ sessions: [Session], on date: Date, calendar: Calendar = .current) -> [Session] {
-        sessions
-            .filter { calendar.isDate($0.scheduledAt, inSameDayAs: date) }
+        let selectedDay = calendar.dateComponents([.year, .month, .day], from: date)
+        return sessions
+            .filter { session in
+                let sessionDay = session.displayCalendar.dateComponents(
+                    [.year, .month, .day],
+                    from: session.scheduledAt
+                )
+                return sessionDay.year == selectedDay.year
+                    && sessionDay.month == selectedDay.month
+                    && sessionDay.day == selectedDay.day
+            }
             .sorted { $0.startMinutes < $1.startMinutes }
     }
 
-    /// Sessions in the Monday-based week containing `anchor`.
+    /// Sessions whose session-zone civil day falls in the Monday-based week strip.
     static func sessionsInWeek(_ sessions: [Session], containing anchor: Date = Date(), calendar: Calendar = .current) -> [Session] {
         let week = week(containing: anchor, calendar: calendar)
-        guard let first = week.first, let last = week.last else { return [] }
-        let start = calendar.startOfDay(for: first)
-        guard let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: last)) else { return [] }
-        return sessions.filter { $0.scheduledAt >= start && $0.scheduledAt < end }
+        guard !week.isEmpty else { return [] }
+        let selectedDays: Set<DateComponents> = Set(
+            week.map { calendar.dateComponents([.year, .month, .day], from: $0) }
+        )
+        return sessions.filter { session in
+            let sessionDay = session.displayCalendar.dateComponents(
+                [.year, .month, .day],
+                from: session.scheduledAt
+            )
+            return selectedDays.contains {
+                $0.year == sessionDay.year && $0.month == sessionDay.month && $0.day == sessionDay.day
+            }
+        }
     }
 }

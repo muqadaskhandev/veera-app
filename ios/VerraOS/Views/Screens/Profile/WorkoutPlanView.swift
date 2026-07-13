@@ -84,6 +84,7 @@ struct WorkoutPlanView: View {
     @State private var selectedCategory: ExerciseCategoryFilter = .all
     @State private var previewExercise: LibraryExercise?
     @State private var searchTask: Task<Void, Never>?
+    @State private var didResolveClientWeek = false
 
     private static let defaultSectionID = UUID()
 
@@ -136,6 +137,9 @@ struct WorkoutPlanView: View {
                 VStack(spacing: Theme.Spacing.md) {
                     weekSelector
                     weekStrip
+                    if let focus = selectedDay?.focus, !focus.isEmpty {
+                        dayFocusBanner(focus)
+                    }
                     if !isReadOnly { modeToggle }
                     if mode == .builder || isReadOnly { builderSection } else { freestyleSection }
                 }
@@ -147,6 +151,13 @@ struct WorkoutPlanView: View {
         }
         .background(Theme.Color.background)
         .toast($toast)
+        .task {
+            await profile.refreshModule(.workout, for: client, week: weekIndex)
+            if isReadOnly, !didResolveClientWeek {
+                await resolveClientWeekToPlan()
+                didResolveClientWeek = true
+            }
+        }
         .task(id: weekIndex) {
             await profile.refreshModule(.workout, for: client, week: weekIndex)
         }
@@ -246,12 +257,17 @@ struct WorkoutPlanView: View {
             Button { stepWeek(1) } label: {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Theme.Color.ink)
+                    .foregroundStyle(
+                        isReadOnly && weekIndex >= weekCount - 1
+                            ? Theme.Color.inkFaint
+                            : Theme.Color.ink
+                    )
                     .frame(width: 34, height: 34)
                     .background(Theme.Color.surface, in: Circle())
                     .overlay(Circle().stroke(Theme.Color.hairline, lineWidth: 1))
             }
             .buttonStyle(.plain)
+            .disabled(isReadOnly && weekIndex >= weekCount - 1)
         }
     }
 
@@ -321,14 +337,21 @@ struct WorkoutPlanView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "text.alignleft")
+        let isRest = selectedDay?.isRest == true && !(selectedDay?.exercises.isEmpty ?? true)
+        return VStack(spacing: 10) {
+            Image(systemName: isRest ? "moon.zzz.fill" : "text.alignleft")
                 .font(.system(size: 28, weight: .semibold))
                 .foregroundStyle(Theme.Color.inkFaint)
-            Text(isReadOnly ? "No plan yet" : "Start with a header")
+            Text(isReadOnly ? (isRest ? "Rest day" : "No plan yet") : "Start with a header")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(Theme.Color.ink)
-            Text(isReadOnly ? "Your coach hasn't added a workout for this day yet." : "Create a section header first, then add exercises and rest days beneath it.")
+            Text(
+                isReadOnly
+                    ? (isRest
+                        ? "No training programmed for this day — try another day or week."
+                        : "Your coach hasn't added a workout for this day yet. Check other days or weeks above.")
+                    : "Create a section header first, then add exercises and rest days beneath it."
+            )
                 .font(.system(size: 13.5, weight: .medium))
                 .foregroundStyle(Theme.Color.inkMuted)
                 .multilineTextAlignment(.center)
@@ -338,6 +361,21 @@ struct WorkoutPlanView: View {
         .padding(.horizontal, Theme.Spacing.md)
         .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+    }
+
+    private func dayFocusBanner(_ focus: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "flame.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Theme.Color.accentInk)
+            Text(focus)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.Color.ink)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(Theme.Color.accent.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
     }
 
     private func sectionCard(_ section: BuilderSection) -> some View {
@@ -766,11 +804,51 @@ struct WorkoutPlanView: View {
     }
 
     private func stepWeek(_ delta: Int) {
-        let target = max(0, weekIndex + delta)
+        let target: Int
+        if isReadOnly {
+            target = min(max(0, weekIndex + delta), max(0, weekCount - 1))
+        } else {
+            target = max(0, weekIndex + delta)
+            // Stepping forward past the last week generates a new blank week (trainer only).
+            if delta > 0 { profile.ensureWorkoutWeek(client.id, week: target) }
+        }
         guard target != weekIndex else { return }
-        // Stepping forward past the last week generates a new blank week.
-        if delta > 0 { profile.ensureWorkoutWeek(client.id, week: target) }
         withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) { weekIndex = target }
+    }
+
+    /// Clients often land on Week 1 / today while the coach edited a later week.
+    /// Prefetch weeks and jump to the one that actually has today's training.
+    @MainActor
+    private func resolveClientWeekToPlan() async {
+        let initialCount = profile.workoutWeekCount(for: client.id)
+        for week in 0..<initialCount {
+            await profile.refreshModule(.workout, for: client, week: week)
+        }
+        let count = profile.workoutWeekCount(for: client.id)
+        for week in initialCount..<count {
+            await profile.refreshModule(.workout, for: client, week: week)
+        }
+
+        let day = selectedDayIndex
+        var bestWithTraining: Int?
+        var bestWithAny: Int?
+        for week in (0..<profile.workoutWeekCount(for: client.id)).reversed() {
+            let days = profile.workoutWeek(for: client.id, week: week)
+            guard days.indices.contains(day) else { continue }
+            let exercises = days[day].exercises
+            if exercises.contains(where: { $0.kind == .exercise }) {
+                bestWithTraining = week
+                break
+            }
+            if bestWithAny == nil, !exercises.isEmpty {
+                bestWithAny = week
+            }
+        }
+
+        let target = bestWithTraining ?? bestWithAny ?? weekIndex
+        if target != weekIndex {
+            weekIndex = target
+        }
     }
 
     private func saveExercise(_ result: WorkoutExercise) {

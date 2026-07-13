@@ -2,6 +2,7 @@ import Fluent
 import FluentPostgresDriver
 import Foundation
 import JWT
+import NIOSSL
 import Vapor
 
 /// Configures the Vapor application: database, migrations, and middleware.
@@ -20,6 +21,9 @@ func configure(_ app: Application) async throws {
     let username = Environment.get("DATABASE_USERNAME") ?? NSUserName()
     let password = Environment.get("DATABASE_PASSWORD").flatMap { $0.isEmpty ? nil : $0 }
     let database = Environment.get("DATABASE_NAME") ?? "verra_dev"
+    // Supabase / managed Postgres require TLS; local Homebrew Postgres usually does not.
+    let useTLS = Environment.get("DATABASE_SSL").map { ["1", "true", "yes"].contains($0.lowercased()) }
+        ?? !(hostname == "localhost" || hostname == "127.0.0.1")
 
     app.databases.use(
         DatabaseConfigurationFactory.postgres(configuration: .init(
@@ -28,7 +32,7 @@ func configure(_ app: Application) async throws {
             username: username,
             password: password,
             database: database,
-            tls: .disable
+            tls: useTLS ? .require(try .init(configuration: .makeClientConfiguration())) : .disable
         )),
         as: .psql
     )
@@ -68,6 +72,7 @@ func configure(_ app: Application) async throws {
     app.migrations.add(CreateStripePayments())
     app.migrations.add(SeedDefaultTrainer())
     app.migrations.add(SeedDefaultAdmin())
+    app.migrations.add(AddSessionTimeZone())
 
     app.lifecycle.use(ReminderPollingService())
 

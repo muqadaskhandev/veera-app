@@ -2,11 +2,7 @@ import Foundation
 
 enum SessionLoader {
     static func session(from dto: SessionDTO) -> Session {
-        let calendar = Calendar.current
-        let day = calendar.component(.day, from: dto.scheduledAt)
-        let hour = calendar.component(.hour, from: dto.scheduledAt)
-        let minute = calendar.component(.minute, from: dto.scheduledAt)
-        let startMinutes = hour * 60 + minute
+        let timeZoneIdentifier = dto.timeZoneIdentifier ?? TimeZone.current.identifier
         let tag = SessionTag(rawValue: dto.accent) ?? accent(from: dto.focus)
 
         return Session.make(
@@ -14,9 +10,10 @@ enum SessionLoader {
             clientID: dto.clientID,
             clientName: dto.clientName,
             initials: dto.initials,
-            dayOfMonth: day,
-            startMinutes: startMinutes,
+            dayOfMonth: 1,
+            startMinutes: 0,
             scheduledAt: dto.scheduledAt,
+            timeZoneIdentifier: timeZoneIdentifier,
             durationMinutes: dto.durationMinutes,
             accent: tag,
             location: dto.location,
@@ -35,6 +32,7 @@ enum SessionLoader {
             accent: session.accent.rawValue,
             initials: session.initials,
             scheduledAt: session.scheduledAt,
+            timeZoneIdentifier: session.timeZoneIdentifier,
             durationMinutes: session.durationMinutes,
             notes: session.notes
         )
@@ -49,6 +47,7 @@ enum SessionLoader {
             accent: session.accent.rawValue,
             initials: session.initials,
             scheduledAt: session.scheduledAt,
+            timeZoneIdentifier: session.timeZoneIdentifier,
             durationMinutes: session.durationMinutes,
             notes: session.notes,
             isCompleted: session.isCompleted,

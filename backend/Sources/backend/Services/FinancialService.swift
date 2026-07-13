@@ -117,14 +117,6 @@ enum FinancialService {
                 on: database,
                 app: app
             )
-            await ChatHub.shared.send(
-                to: clientUserID,
-                event: ChatEvent(
-                    type: "notification.new",
-                    title: "Sessions added",
-                    preview: body
-                )
-            )
         }
 
         return try FinancialEventDTO(from: event, clientName: client.name)

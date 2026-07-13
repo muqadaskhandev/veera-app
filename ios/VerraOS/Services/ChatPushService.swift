@@ -34,13 +34,28 @@ enum ChatPushService {
     }
 
     @MainActor
-    static func showLocalNotification(title: String, body: String, conversationID: UUID? = nil) {
+    static func showLocalNotification(
+        title: String,
+        body: String,
+        conversationID: UUID? = nil,
+        opensSchedule: Bool = false
+    ) {
+        // App is open — in-app banner already covers this; avoid a stacked system banner.
+        guard UIApplication.shared.applicationState != .active else { return }
+
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
+        var userInfo: [String: Any] = [:]
         if let conversationID {
-            content.userInfo = ["conversationID": conversationID.uuidString]
+            userInfo["conversationID"] = conversationID.uuidString
+        }
+        if opensSchedule {
+            userInfo["sessionID"] = "schedule"
+        }
+        if !userInfo.isEmpty {
+            content.userInfo = userInfo
         }
 
         let request = UNNotificationRequest(

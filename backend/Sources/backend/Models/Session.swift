@@ -31,6 +31,9 @@ final class Session: Model, @unchecked Sendable {
     @Field(key: "scheduled_at")
     var scheduledAt: Date
 
+    @OptionalField(key: "time_zone_identifier")
+    var timeZoneIdentifier: String?
+
     @Field(key: "duration_minutes")
     var durationMinutes: Int
 
@@ -61,6 +64,7 @@ final class Session: Model, @unchecked Sendable {
         accent: String,
         initials: String,
         scheduledAt: Date,
+        timeZoneIdentifier: String? = nil,
         durationMinutes: Int = 60,
         notes: String = "",
         isCompleted: Bool = false,
@@ -77,6 +81,7 @@ final class Session: Model, @unchecked Sendable {
         self.accent = accent
         self.initials = initials
         self.scheduledAt = scheduledAt
+        self.timeZoneIdentifier = timeZoneIdentifier
         self.durationMinutes = durationMinutes
         self.notes = notes
         self.isCompleted = isCompleted
@@ -96,6 +101,7 @@ struct SessionDTO: Content {
     let accent: String
     let initials: String
     let scheduledAt: Date
+    let timeZoneIdentifier: String?
     let durationMinutes: Int
     let notes: String
     let isCompleted: Bool
@@ -114,6 +120,7 @@ struct SessionDTO: Content {
         self.accent = session.accent
         self.initials = session.initials
         self.scheduledAt = session.scheduledAt
+        self.timeZoneIdentifier = session.timeZoneIdentifier
         self.durationMinutes = session.durationMinutes
         self.notes = session.notes
         self.isCompleted = session.isCompleted
@@ -130,6 +137,7 @@ struct CreateSessionRequest: Content {
     var accent: String
     var initials: String
     var scheduledAt: Date
+    var timeZoneIdentifier: String?
     var durationMinutes: Int?
     var notes: String?
 }

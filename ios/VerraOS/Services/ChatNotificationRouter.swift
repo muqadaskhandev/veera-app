@@ -51,7 +51,12 @@ enum ChatNotificationRouter {
         }
     }
 
-    static func postIncomingChatAlert(title: String, body: String, conversationID: UUID? = nil) {
+    static func postIncomingChatAlert(
+        title: String,
+        body: String,
+        conversationID: UUID? = nil,
+        opensSchedule: Bool = false
+    ) {
         var info: [String: Any] = [
             "title": title,
             "body": body,
@@ -59,10 +64,29 @@ enum ChatNotificationRouter {
         if let conversationID {
             info["conversationID"] = conversationID.uuidString
         }
-        if title == "Sessions added" {
+        if opensSchedule {
+            info["opensSchedule"] = true
+        }
+
+        switch title {
+        case "Sessions added", "Package added":
             info["symbol"] = "checkmark.seal.fill"
             info["tintHex"] = NSNumber(value: UInt(0x4FA85C))
+        case "New session scheduled":
+            info["symbol"] = "calendar.badge.plus"
+            info["tintHex"] = NSNumber(value: UInt(0x3D7FE8))
+            info["opensSchedule"] = true
+        case "Session cancelled":
+            info["symbol"] = "calendar.badge.minus"
+            info["tintHex"] = NSNumber(value: UInt(0xE08A3C))
+            info["opensSchedule"] = true
+        case "Session completed":
+            info["symbol"] = "checkmark.seal.fill"
+            info["tintHex"] = NSNumber(value: UInt(0x4FA85C))
+        default:
+            break
         }
+
         NotificationCenter.default.post(
             name: .incomingChatAlert,
             object: nil,

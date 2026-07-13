@@ -93,6 +93,7 @@ struct ScheduleView: View {
                 clientStore.syncRoster(to: store)
                 await store.refreshFromServer()
                 await store.refreshCalendarData()
+                focusOnRelevantDay()
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -211,10 +212,7 @@ struct ScheduleView: View {
 
     private var nextSessionSubtitle: String {
         if let session = store.nextUpcomingSession {
-            let dayLabel = Calendar.current.isDateInToday(session.scheduledAt)
-                ? Session.display(session.startMinutes)
-                : "\(session.scheduledAt.formatted(.dateTime.weekday(.abbreviated).hour().minute()))"
-            return "Next: \(dayLabel) · \(session.clientName)"
+            return "Next: \(session.scheduleTimeLabel) · \(session.clientName)"
         }
         if !remainingToday.isEmpty {
             return "Today: \(remainingToday.count) left"
@@ -296,6 +294,7 @@ struct ScheduleView: View {
                 week: week,
                 selectedDate: $selectedDate,
                 sessions: daySessions,
+                weekSessions: store.sessionsInWeek(containing: selectedDate),
                 onSelectSession: { session in
                     guard !isImportedBusyBlock(session) else { return }
                     detailSession = session
@@ -313,6 +312,27 @@ struct ScheduleView: View {
                     mode = .day
                 }
             }
+        }
+    }
+
+    /// Prefer today when booked; otherwise open on the next upcoming session day.
+    private func focusOnRelevantDay() {
+        let calendar = Calendar.current
+        let today = Date()
+        let todaySessions = store.sessions(on: today).filter {
+            !$0.isSkipped && $0.accent != .personal && !isImportedBusyBlock($0)
+        }
+        if !todaySessions.isEmpty {
+            selectedDate = today
+            store.visibleMonthAnchor = today
+            return
+        }
+        if let next = store.nextUpcomingSession {
+            selectedDate = next.scheduledAt
+            store.visibleMonthAnchor = next.scheduledAt
+        } else {
+            selectedDate = today
+            store.visibleMonthAnchor = today
         }
     }
 }

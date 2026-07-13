@@ -58,6 +58,7 @@ struct IncomingChatAlert: Equatable {
     let title: String
     let body: String
     var conversationID: UUID? = nil
+    var opensSchedule: Bool = false
     var symbol: String = "bubble.left.fill"
     var tintHex: UInt = 0x3D7FE8
 }

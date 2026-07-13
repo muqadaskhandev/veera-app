@@ -10,6 +10,7 @@ struct SessionDTO: Codable {
     let accent: String
     let initials: String
     let scheduledAt: Date
+    let timeZoneIdentifier: String?
     let durationMinutes: Int
     let notes: String
     let isCompleted: Bool

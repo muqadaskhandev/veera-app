@@ -22,6 +22,8 @@ struct Session: Identifiable {
     var startMinutes: Int
     /// Absolute start time used for API sync and Apple Calendar export.
     var scheduledAt: Date
+    /// IANA time zone the appointment was created in (keeps trainer/client wall-clock aligned).
+    var timeZoneIdentifier: String
     /// Session length in minutes.
     var durationMinutes: Int
     /// Free-form notes shown in the detail card.
@@ -45,6 +47,7 @@ struct Session: Identifiable {
         dayOfMonth: Int,
         startMinutes: Int,
         scheduledAt: Date? = nil,
+        timeZoneIdentifier: String = TimeZone.current.identifier,
         durationMinutes: Int = 60,
         notes: String = "",
         isCompleted: Bool = false,
@@ -62,10 +65,21 @@ struct Session: Identifiable {
         self.dayOfMonth = dayOfMonth
         self.startMinutes = startMinutes
         self.scheduledAt = scheduledAt ?? Self.scheduledDate(dayOfMonth: dayOfMonth, startMinutes: startMinutes)
+        self.timeZoneIdentifier = timeZoneIdentifier
         self.durationMinutes = durationMinutes
         self.notes = notes
         self.isCompleted = isCompleted
         self.isSkipped = isSkipped
+    }
+
+    var displayTimeZone: TimeZone {
+        TimeZone(identifier: timeZoneIdentifier) ?? .current
+    }
+
+    var displayCalendar: Calendar {
+        var calendar = Calendar.current
+        calendar.timeZone = displayTimeZone
+        return calendar
     }
 }
 
@@ -137,9 +151,17 @@ extension Session {
     /// Meridiem for this session's start (used by the timeline rows).
     var startMeridiem: String { Session.clock(startMinutes).meridiem }
 
-    /// Full "2:00 PM – 3:00 PM" range string.
+    /// Full "2:00 PM – 3:00 PM" range string in the session's timezone.
     var timeRange: String {
         "\(Session.display(startMinutes)) – \(Session.display(startMinutes + durationMinutes))"
+    }
+
+    /// Weekday + time in the session's timezone, e.g. "Mon 2:50 PM".
+    var scheduleTimeLabel: String {
+        let weekday = displayCalendar.component(.weekday, from: scheduledAt)
+        let labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        let day = labels[max(0, min(6, weekday - 1))]
+        return "\(day) \(Session.display(startMinutes))"
     }
 
     /// Human title for calendar export, e.g. "Consultation with Sarah".
@@ -176,6 +198,7 @@ extension Session {
         dayOfMonth: Int,
         startMinutes: Int,
         scheduledAt: Date? = nil,
+        timeZoneIdentifier: String = TimeZone.current.identifier,
         durationMinutes: Int,
         accent: SessionTag,
         location: String,
@@ -183,8 +206,15 @@ extension Session {
         isCompleted: Bool = false,
         isSkipped: Bool = false
     ) -> Session {
-        let resolved = scheduledAt ?? Self.scheduledDate(dayOfMonth: dayOfMonth, startMinutes: startMinutes)
-        let calendar = Calendar.current
+        let zone = TimeZone(identifier: timeZoneIdentifier) ?? .current
+        var calendar = Calendar.current
+        calendar.timeZone = zone
+        let resolved = scheduledAt ?? Self.scheduledDate(
+            dayOfMonth: dayOfMonth,
+            startMinutes: startMinutes,
+            monthAnchor: Date(),
+            timeZone: zone
+        )
         let resolvedDay = calendar.component(.day, from: resolved)
         let resolvedMinutes = calendar.component(.hour, from: resolved) * 60 + calendar.component(.minute, from: resolved)
         return Session(
@@ -200,6 +230,7 @@ extension Session {
             dayOfMonth: resolvedDay,
             startMinutes: resolvedMinutes,
             scheduledAt: resolved,
+            timeZoneIdentifier: timeZoneIdentifier,
             durationMinutes: durationMinutes,
             notes: notes,
             isCompleted: isCompleted,
@@ -208,13 +239,20 @@ extension Session {
     }
 
     /// Combines day-of-month and start time in the current month (fallback when no absolute date exists).
-    static func scheduledDate(dayOfMonth: Int, startMinutes: Int, monthAnchor: Date = Date()) -> Date {
-        let calendar = Calendar.current
+    static func scheduledDate(
+        dayOfMonth: Int,
+        startMinutes: Int,
+        monthAnchor: Date = Date(),
+        timeZone: TimeZone = .current
+    ) -> Date {
+        var calendar = Calendar.current
+        calendar.timeZone = timeZone
         var components = calendar.dateComponents([.year, .month], from: monthAnchor)
         components.day = dayOfMonth
         components.hour = startMinutes / 60
         components.minute = startMinutes % 60
         components.second = 0
+        components.timeZone = timeZone
         return calendar.date(from: components) ?? Date()
     }
 }

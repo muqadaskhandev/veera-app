@@ -44,6 +44,18 @@ struct ClientScheduleView: View {
             .count
     }
 
+    private var weekSessions: [Session] {
+        ScheduleCalendar.sessionsInWeek(mySessions, containing: selectedDate)
+    }
+
+    private var nextUpcoming: Session? {
+        let now = Date()
+        return mySessions
+            .filter { !$0.isCompleted && !$0.isSkipped && $0.scheduledAt >= Calendar.current.startOfDay(for: now) }
+            .sorted { $0.scheduledAt < $1.scheduledAt }
+            .first
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
@@ -60,11 +72,31 @@ struct ClientScheduleView: View {
         .sheet(item: $detailSession) { session in
             detailCard(for: session)
         }
-        .onAppear {
+        .task {
             store.reconcilePastSessions(clientStore: clientStore)
-            selectedDate = Date()
-            monthAnchor = Date()
-            Task { await store.refreshFromServer() }
+            await store.refreshFromServer()
+            focusOnRelevantDay()
+        }
+    }
+
+    /// Open on today when it has sessions; otherwise jump to the next booked day
+    /// so a Monday appointment isn't hidden behind Sunday's empty day strip.
+    private func focusOnRelevantDay() {
+        let calendar = Calendar.current
+        let today = Date()
+        let todaySessions = ScheduleCalendar.sessions(mySessions, on: today, calendar: calendar)
+            .filter { !$0.isSkipped }
+        if !todaySessions.isEmpty {
+            selectedDate = today
+            monthAnchor = today
+            return
+        }
+        if let next = nextUpcoming {
+            selectedDate = next.scheduledAt
+            monthAnchor = next.scheduledAt
+        } else {
+            selectedDate = today
+            monthAnchor = today
         }
     }
 
@@ -121,6 +153,7 @@ struct ClientScheduleView: View {
                 week: week,
                 selectedDate: $selectedDate,
                 sessions: daySessions,
+                weekSessions: weekSessions,
                 onSelectSession: { detailSession = $0 }
             )
         case .month:

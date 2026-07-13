@@ -55,6 +55,7 @@ enum SessionService {
             accent: payload.accent,
             initials: payload.initials,
             scheduledAt: payload.scheduledAt,
+            timeZoneIdentifier: payload.timeZoneIdentifier,
             durationMinutes: payload.durationMinutes ?? 60,
             notes: payload.notes ?? ""
         )
@@ -84,6 +85,7 @@ enum SessionService {
         if let accent = payload.accent { session.accent = accent }
         if let initials = payload.initials { session.initials = initials }
         if let scheduledAt = payload.scheduledAt { session.scheduledAt = scheduledAt }
+        if let timeZoneIdentifier = payload.timeZoneIdentifier { session.timeZoneIdentifier = timeZoneIdentifier }
         if let durationMinutes = payload.durationMinutes { session.durationMinutes = durationMinutes }
         if let notes = payload.notes { session.notes = notes }
         if let isCompleted = payload.isCompleted { session.isCompleted = isCompleted }
@@ -195,7 +197,7 @@ enum SessionService {
             topic: .schedule,
             category: "schedule",
             title: "New session scheduled",
-            body: "\(trainer.name) scheduled \(session.focus) on \(Self.timeLabel(session.scheduledAt)).",
+            body: "\(trainer.name) scheduled \(session.focus) on \(Self.timeLabel(session.scheduledAt, timeZoneIdentifier: session.timeZoneIdentifier)).",
             pushKind: .sessionScheduled,
             sessionID: session.id,
             on: database,
@@ -207,7 +209,7 @@ enum SessionService {
             let body = TwilioService.sessionReminderMessage(
                 clientName: client.name,
                 focus: session.focus,
-                timeLabel: Self.timeLabel(session.scheduledAt),
+                timeLabel: Self.timeLabel(session.scheduledAt, timeZoneIdentifier: session.timeZoneIdentifier),
                 location: session.location
             )
             _ = try? await NotificationDeliveryService.sendSMS(
@@ -232,7 +234,7 @@ enum SessionService {
             topic: .schedule,
             category: "cancellation",
             title: "Session cancelled",
-            body: "Your \(session.focus) session on \(Self.timeLabel(session.scheduledAt)) was cancelled.",
+            body: "Your \(session.focus) session on \(Self.timeLabel(session.scheduledAt, timeZoneIdentifier: session.timeZoneIdentifier)) was cancelled.",
             pushKind: .sessionCancelled,
             sessionID: session.id,
             on: database,
@@ -240,10 +242,13 @@ enum SessionService {
         )
     }
 
-    static func timeLabel(_ date: Date) -> String {
+    static func timeLabel(_ date: Date, timeZoneIdentifier: String? = nil) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
+        if let timeZoneIdentifier, let zone = TimeZone(identifier: timeZoneIdentifier) {
+            formatter.timeZone = zone
+        }
         return formatter.string(from: date)
     }
 }
@@ -256,6 +261,7 @@ struct UpdateSessionRequest: Content {
     var accent: String?
     var initials: String?
     var scheduledAt: Date?
+    var timeZoneIdentifier: String?
     var durationMinutes: Int?
     var notes: String?
     var isCompleted: Bool?

@@ -144,10 +144,14 @@ struct ClientRootView: View {
                     tint: Color(hex: incomingChatAlert.tintHex),
                     onTap: {
                         let id = incomingChatAlert.conversationID
+                        let opensSchedule = incomingChatAlert.opensSchedule
                         self.incomingChatAlert = nil
                         if let id {
                             conversationID = id
                             withAnimation(.easeInOut(duration: 0.2)) { tab = .messages }
+                        } else if opensSchedule {
+                            withAnimation(.easeInOut(duration: 0.2)) { tab = .schedule }
+                            Task { await schedule.refreshFromServer() }
                         } else {
                             showingNotifications = true
                         }
@@ -252,11 +256,13 @@ struct ClientRootView: View {
             }()
             let symbol = info["symbol"] as? String ?? "bubble.left.fill"
             let tintHex = (info["tintHex"] as? NSNumber)?.uintValue ?? 0x3D7FE8
+            let opensSchedule = info["opensSchedule"] as? Bool ?? false
             notifications.prependMessageAlert(title: title, detail: body)
             let alert = IncomingChatAlert(
                 title: title,
                 body: body,
                 conversationID: conversationID,
+                opensSchedule: opensSchedule,
                 symbol: symbol,
                 tintHex: tintHex
             )

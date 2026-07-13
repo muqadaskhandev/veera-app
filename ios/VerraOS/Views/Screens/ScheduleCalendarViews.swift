@@ -15,6 +15,8 @@ struct DayTimelineView: View {
     let week: [Date]
     @Binding var selectedDate: Date
     let sessions: [Session]
+    /// All sessions in the visible week — used for day-strip dots.
+    var weekSessions: [Session] = []
     var onSelectSession: (Session) -> Void
 
     private var calendar: Calendar { Calendar.current }
@@ -38,6 +40,9 @@ struct DayTimelineView: View {
         HStack(spacing: 8) {
             ForEach(week, id: \.self) { date in
                 let isActive = calendar.isDate(date, inSameDayAs: selectedDate)
+                let hasSessions = weekSessions.contains {
+                    calendar.isDate($0.scheduledAt, inSameDayAs: date) && !$0.isSkipped
+                }
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                         selectedDate = date
@@ -50,6 +55,9 @@ struct DayTimelineView: View {
                         Text("\(ScheduleCalendar.dayOfMonth(for: date, calendar: calendar))")
                             .font(.system(size: 17, weight: .bold, design: .rounded))
                             .foregroundStyle(isActive ? Theme.Color.accentInk : Theme.Color.ink)
+                        Circle()
+                            .fill(hasSessions ? (isActive ? Theme.Color.accentInk : Theme.Color.accent) : Color.clear)
+                            .frame(width: 5, height: 5)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
