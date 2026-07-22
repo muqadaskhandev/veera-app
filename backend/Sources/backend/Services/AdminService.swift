@@ -355,11 +355,12 @@ enum AdminService {
                 trainerID = try await TrainerService.defaultTrainer(on: database).requireID()
             }
             let initials = Self.initials(from: payload.displayName)
+            let sessionsRemaining = payload.sessionsRemaining ?? 0
             let client = Client(
                 trainerID: trainerID,
                 name: payload.displayName,
                 initials: initials,
-                sessionsRemaining: payload.sessionsRemaining ?? 0,
+                sessionsRemaining: sessionsRemaining,
                 daysLeftOnPlan: 30,
                 status: "active",
                 email: normalizedEmail,
@@ -375,6 +376,12 @@ enum AdminService {
             )
             client.$user.id = userID
             try await client.save(on: database)
+            try await FinancialService.recordInitialPackage(
+                client: client,
+                trainerID: trainerID,
+                sessionsRemaining: sessionsRemaining,
+                on: database
+            )
         case .admin:
             break
         }

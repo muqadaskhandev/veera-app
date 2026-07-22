@@ -89,3 +89,8 @@ struct RedeemInviteResponse: Content {
     let trainerName: String
     let profile: ProfileResponse
 }
+
+struct ClientInviteLinkResponse: Content {
+    let code: String
+    let url: String
+}

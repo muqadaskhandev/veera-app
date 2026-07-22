@@ -70,6 +70,7 @@ struct ClientRootView: View {
     @State private var showingHelp = false
     @State private var showingSettings = false
     @State private var showingRedeemInvite = false
+    @State private var pendingInviteCode: String?
     @State private var showingNotifications = false
     @State private var showLogOutConfirm = false
     @State private var incomingChatAlert: IncomingChatAlert?
@@ -202,9 +203,12 @@ struct ClientRootView: View {
             .environment(account)
         }
         .sheet(isPresented: $showingRedeemInvite) {
-            ClientRedeemInviteSheet(account: account) {
+            ClientRedeemInviteSheet(account: account, prefillCode: pendingInviteCode) {
                 Task { await refreshAll() }
             }
+        }
+        .onChange(of: showingRedeemInvite) { _, isShowing in
+            if !isShowing { pendingInviteCode = nil }
         }
         .sheet(isPresented: $showingNotifications) {
             NotificationCenterView()
@@ -216,9 +220,15 @@ struct ClientRootView: View {
         }
         .task {
             await refreshAll()
+            checkPendingInviteLink()
         }
         .onDisappear {
             messages.stop()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .deepLinkInviteCodeReceived)) { notification in
+            guard let code = notification.object as? String else { return }
+            pendingInviteCode = code
+            showingRedeemInvite = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .healthKitDataUpdated)) { _ in
             Task {
@@ -274,6 +284,15 @@ struct ClientRootView: View {
                 }
             }
         }
+    }
+
+    /// Applies an invite code captured from a universal/deep link before this
+    /// view existed (e.g. tapped before sign-in or onboarding finished).
+    @MainActor
+    private func checkPendingInviteLink() {
+        guard account.coachProfile.name.isEmpty, let code = DeepLinkRouter.shared.consumePendingCode() else { return }
+        pendingInviteCode = code
+        showingRedeemInvite = true
     }
 
     @MainActor

@@ -122,7 +122,7 @@ struct AddEditAppointmentView: View {
         repeatWeekly ? max(selectedWeekdays.count, clientRemaining) : selectedWeekdays.count
     }
 
-    /// Concrete dates (within June 2026) the series will land on, capped.
+    /// Concrete dates the series will land on, capped at `sessionCap`.
     private func occurrenceDates() -> [Date] {
         guard isMultiDay else { return [] }
         let cal = Calendar.current
@@ -134,9 +134,8 @@ struct AddEditAppointmentView: View {
         let maxScan = repeatWeekly ? 7 * 8 : 7
         while offset < maxScan && result.count < sessionCap {
             if let day = cal.date(byAdding: .day, value: offset, to: weekStart) {
-                let comps = cal.dateComponents([.year, .month, .weekday], from: day)
-                if comps.year == 2026, comps.month == 6,
-                   let wd = comps.weekday, selectedWeekdays.contains(wd),
+                let comps = cal.dateComponents([.weekday], from: day)
+                if let wd = comps.weekday, selectedWeekdays.contains(wd),
                    let dt = cal.date(bySettingHour: hour, minute: minute, second: 0, of: day) {
                     result.append(dt)
                 }

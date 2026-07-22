@@ -17,6 +17,7 @@ struct MessagesView: View {
     @State private var search: String = ""
     @State private var path = NavigationPath()
     @State private var showingNew = false
+    @State private var showingArchived = false
 
     private var rows: [Conversation] {
         store.inbox(search: search)
@@ -59,6 +60,9 @@ struct MessagesView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingArchived) {
+            ArchivedConversationsSheet()
+        }
         .onAppear { openPendingChatIfNeeded() }
         .onChange(of: app.pendingChatClientID) { _, _ in openPendingChatIfNeeded() }
         .onChange(of: app.pendingChatConversationID) { _, _ in openPendingChatIfNeeded() }
@@ -90,30 +94,77 @@ struct MessagesView: View {
     // MARK: Content
 
     private var content: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+        List {
+            Section {
                 countHeader
                 searchField
-                if rows.isEmpty {
-                    emptyState
-                } else {
-                    LazyVStack(spacing: Theme.Spacing.sm) {
-                        ForEach(rows) { convo in
-                            Button {
-                                store.markRead(convo.id)
-                                path.append(convo)
-                            } label: {
-                                ConversationRow(conversation: convo)
-                            }
-                            .buttonStyle(.plain)
+                if store.hasArchivedConversations {
+                    archivedBanner
+                }
+            }
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 0, leading: Theme.Spacing.md, bottom: 0, trailing: Theme.Spacing.md))
+
+            if rows.isEmpty {
+                emptyState
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 0, leading: Theme.Spacing.md, bottom: 0, trailing: Theme.Spacing.md))
+            } else {
+                ForEach(rows) { convo in
+                    Button {
+                        store.markRead(convo.id)
+                        path.append(convo)
+                    } label: {
+                        ConversationRow(conversation: convo)
+                    }
+                    .buttonStyle(.plain)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 5, leading: Theme.Spacing.md, bottom: 5, trailing: Theme.Spacing.md))
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            store.delete(convo.id)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
+                        Button {
+                            store.archive(convo.id)
+                        } label: {
+                            Label("Archive", systemImage: "archivebox.fill")
+                        }
+                        .tint(Color(hex: 0xE7B83C))
                     }
                 }
             }
-            .padding(.horizontal, Theme.Spacing.md)
-            .padding(.top, Theme.Spacing.sm)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .padding(.top, Theme.Spacing.sm)
         .tabScrollContent()
+    }
+
+    private var archivedBanner: some View {
+        Button { showingArchived = true } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "archivebox.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.Color.inkMuted)
+                Text("Archived conversations")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(Theme.Color.inkMuted)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Theme.Color.inkFaint)
+            }
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, 12)
+            .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     private var countHeader: some View {
@@ -234,6 +285,86 @@ private struct ConversationRow: View {
         .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
         .cardShadow(0.6)
+    }
+}
+
+// MARK: - Archived conversations sheet
+
+private struct ArchivedConversationsSheet: View {
+    @Environment(MessageStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var search: String = ""
+    @State private var path = NavigationPath()
+
+    private var rows: [Conversation] {
+        store.archivedInbox(search: search)
+    }
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            Group {
+                if rows.isEmpty {
+                    emptyState
+                } else {
+                    List {
+                        ForEach(rows) { convo in
+                            Button {
+                                store.markRead(convo.id)
+                                path.append(convo)
+                            } label: {
+                                ConversationRow(conversation: convo)
+                            }
+                            .buttonStyle(.plain)
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 5, leading: Theme.Spacing.md, bottom: 5, trailing: Theme.Spacing.md))
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    store.delete(convo.id)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                Button {
+                                    store.unarchive(convo.id)
+                                } label: {
+                                    Label("Unarchive", systemImage: "tray.and.arrow.up.fill")
+                                }
+                                .tint(Theme.Color.accentInk)
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                }
+            }
+            .background(Theme.Color.background)
+            .preferredColorScheme(.light)
+            .navigationTitle("Archived")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }.foregroundStyle(Theme.Color.inkMuted)
+                }
+            }
+            .navigationDestination(for: Conversation.self) { convo in
+                ChatThreadView(conversationID: convo.id, path: $path)
+                    .navigationBarBackButtonHidden(true)
+                    .toolbar(.hidden, for: .navigationBar)
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "archivebox")
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(Theme.Color.inkFaint)
+            Text("No archived conversations")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.Color.inkMuted)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

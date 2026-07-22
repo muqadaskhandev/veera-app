@@ -121,6 +121,32 @@ struct ClientProfileController: RouteCollection {
         clients.delete(":clientID", "photos", ":photoID", use: deletePhoto)
         clients.get(":clientID", "nutrition", use: nutrition)
         clients.patch(":clientID", "nutrition", use: updateNutrition)
+
+        clients.grouped(RoleGuardMiddleware(.trainer, .admin))
+            .get(":clientID", "invite-link", use: inviteLink)
+    }
+
+    @Sendable
+    func inviteLink(req: Request) async throws -> ClientInviteLinkResponse {
+        let user = try req.auth.require(User.self)
+        guard let clientID = req.parameters.get("clientID", as: UUID.self) else { throw Abort(.badRequest) }
+        let client = try await ClientAccessService.requireClient(clientID, for: user, on: req.db)
+
+        let trainer: Trainer
+        if user.userRole == .admin {
+            guard let resolved = try await Trainer.find(client.$trainer.id, on: req.db) else {
+                throw Abort(.notFound, reason: "Trainer not found")
+            }
+            trainer = resolved
+        } else {
+            guard let resolved = try await Trainer.query(on: req.db).filter(\.$user.$id == user.id!).first() else {
+                throw Abort(.notFound, reason: "Trainer profile not found")
+            }
+            trainer = resolved
+        }
+
+        let invite = try await InviteService.linkForClient(clientID: clientID, trainer: trainer, createdBy: user, on: req.db)
+        return ClientInviteLinkResponse(code: invite.code, url: "\(EmailTemplateService.appURL)/join?code=\(invite.code)")
     }
 
     @Sendable

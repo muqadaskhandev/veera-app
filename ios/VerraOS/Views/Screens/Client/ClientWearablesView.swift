@@ -139,6 +139,21 @@ struct ClientWearablesView: View {
                             }
                         }
                     }
+                    // Apple Watch shares Apple Health's data pipe (HealthKit already
+                    // ingests Watch metrics), so it rides along right under it rather
+                    // than needing its own separate connect toggle.
+                    if device == .appleHealth {
+                        AppleWatchRow(isConnectedViaHealth: wearables.isConnected(.appleHealth)) {
+                            guard !wearables.isConnected(.appleHealth) else { return }
+                            Task {
+                                do {
+                                    try await wearables.toggle(.appleHealth)
+                                } catch {
+                                    toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.circle.fill")
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -307,6 +322,66 @@ private struct DeviceRow: View {
         .padding(Theme.Spacing.md)
         .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(isConnected ? Theme.Color.accent.opacity(0.4) : Theme.Color.hairline, lineWidth: 1))
+        .cardShadow(0.5)
+    }
+}
+
+// MARK: - Apple Watch row (piggybacks on Apple Health)
+
+/// Apple Watch has no connect toggle of its own — HealthKit already carries
+/// its heart rate, rings, and workout data — so this row just surfaces that
+/// the Watch is visible to the trainer whenever Apple Health is connected.
+private struct AppleWatchRow: View {
+    let isConnectedViaHealth: Bool
+    let action: () -> Void
+    private let device = WearableDevice.appleWatch
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().fill(device.tint.opacity(0.15)).frame(width: 46, height: 46)
+                Image(systemName: device.icon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(device.tint)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 7) {
+                    Text(device.name)
+                        .font(.system(size: 15.5, weight: .bold))
+                        .foregroundStyle(Theme.Color.ink)
+                    if isConnectedViaHealth {
+                        HStack(spacing: 4) {
+                            Circle().fill(Color(hex: 0x57C77B)).frame(width: 6, height: 6)
+                            Text("Connected")
+                                .font(.system(size: 10.5, weight: .bold))
+                                .foregroundStyle(Color(hex: 0x3F9E5C))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color(hex: 0x57C77B).opacity(0.14), in: Capsule())
+                    }
+                }
+                Text(isConnectedViaHealth ? "Synced via Apple Health" : device.permissionSummary)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Theme.Color.inkMuted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            if !isConnectedViaHealth {
+                Button(action: action) {
+                    Text("Via Health")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Theme.Color.accentInk)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(Theme.Color.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(Theme.Spacing.md)
+        .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(isConnectedViaHealth ? Theme.Color.accent.opacity(0.4) : Theme.Color.hairline, lineWidth: 1))
         .cardShadow(0.5)
     }
 }

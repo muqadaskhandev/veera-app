@@ -53,6 +53,33 @@ enum FinancialService {
         return try events.map { try FinancialEventDTO(from: $0, clientName: name) }
     }
 
+    /// Logs a ledger entry for sessions pre-filled when a client record is
+    /// created (e.g. via an invite). Unlike `createEvent`, this does NOT touch
+    /// `client.sessionsRemaining` — that balance was already set on the new
+    /// `Client` row, so this only backfills the matching ledger entry so the
+    /// "Packages" filter isn't empty for clients who started with a balance.
+    static func recordInitialPackage(
+        client: Client,
+        trainerID: UUID,
+        sessionsRemaining: Int,
+        occurredAt: Date? = nil,
+        on database: any Database
+    ) async throws {
+        guard sessionsRemaining > 0 else { return }
+        let event = FinancialEvent(
+            trainerID: trainerID,
+            clientID: try client.requireID(),
+            sessionID: nil,
+            kind: "income",
+            title: "Package Added",
+            detail: "Starting session balance",
+            amount: nil,
+            sessionDelta: sessionsRemaining,
+            occurredAt: occurredAt ?? client.createdAt ?? Date()
+        )
+        try await event.save(on: database)
+    }
+
     static func createEvent(
         for user: User,
         payload: CreateFinancialEventRequest,

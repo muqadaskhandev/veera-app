@@ -73,8 +73,12 @@ struct WorkoutPlanView: View {
     @State private var exerciseSearch = ""
     @State private var searchSectionID: UUID?
     @State private var focus: WorkoutFocus = .upper
-    @State private var freestyleNotes = ""
-    @State private var builderNotes = ""
+    @State private var sessionNotes = ""
+    @State private var sessionNotesKey = ""
+    @State private var freestyleName = ""
+    @State private var freestyleSetsText = ""
+    @State private var freestyleRepsText = ""
+    @State private var freestyleWeightText = ""
     @State private var editorTarget: EditorTarget?
     @State private var copyDayTarget = false
     @State private var copyWeekTarget = false
@@ -85,6 +89,7 @@ struct WorkoutPlanView: View {
     @State private var previewExercise: LibraryExercise?
     @State private var searchTask: Task<Void, Never>?
     @State private var didResolveClientWeek = false
+    @State private var progressExercise: WorkoutExercise?
 
     private static let defaultSectionID = UUID()
 
@@ -99,6 +104,16 @@ struct WorkoutPlanView: View {
     private var week: [WorkoutDay] { profile.workoutWeek(for: client.id, week: weekIndex) }
     private var selectedDay: WorkoutDay? {
         week.indices.contains(selectedDayIndex) ? week[selectedDayIndex] : nil
+    }
+
+    /// Uniquely identifies the currently viewed day so session notes reload
+    /// whenever the user switches week or day, instead of leaking across days.
+    private var dayKey: String { "\(weekIndex)-\(selectedDayIndex)" }
+
+    /// Ad-hoc exercises logged from the Freestyle tab (tagged so they stay
+    /// separate from the Detailed builder's structured sections).
+    private var freestyleItems: [WorkoutExercise] {
+        selectedDay?.exercises.filter { $0.kind == .exercise && $0.category == "Freestyle" } ?? []
     }
 
     private var sections: [BuilderSection] {
@@ -148,6 +163,7 @@ struct WorkoutPlanView: View {
             }
             .frame(maxHeight: .infinity)
             .tabScrollContent()
+            .dismissKeyboardOnScroll()
         }
         .background(Theme.Color.background)
         .toast($toast)
@@ -161,6 +177,9 @@ struct WorkoutPlanView: View {
         .task(id: weekIndex) {
             await profile.refreshModule(.workout, for: client, week: weekIndex)
         }
+        .task(id: dayKey) {
+            syncSessionNotesIfNeeded()
+        }
         .onChange(of: exerciseSearch) { _, _ in
             scheduleLibraryRefresh()
         }
@@ -171,6 +190,9 @@ struct WorkoutPlanView: View {
             if sectionID != nil {
                 scheduleLibraryRefresh()
             }
+        }
+        .sheet(item: $progressExercise) { exercise in
+            ExerciseProgressSheet(client: client, exerciseName: exercise.name, exerciseID: exercise.exerciseID)
         }
         .sheet(item: $previewExercise) { exercise in
             ExerciseDetailSheet(exercise: exercise, isEditable: !isReadOnly) { updated in
@@ -330,7 +352,7 @@ struct WorkoutPlanView: View {
             }
             if !isReadOnly {
                 addHeaderButton
-                sessionLogCard(notes: $builderNotes)
+                sessionLogCard
             }
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: draggingID)
@@ -478,11 +500,12 @@ struct WorkoutPlanView: View {
             BuilderItemRow(
                 item: item,
                 isReadOnly: isReadOnly,
-                onCommit: { sets, reps in updateSetsReps(item, sets: sets, reps: reps) },
+                onCommit: { sets, reps, weightKg in updateSetsReps(item, sets: sets, reps: reps, weightKg: weightKg) },
                 onEdit: {
                     editorTarget = .editExercise(item)
                 },
-                onDelete: { deleteExercise(item) }
+                onDelete: { deleteExercise(item) },
+                onShowProgress: item.weightKg != nil ? { progressExercise = item } : nil
             )
             .opacity(draggingID == item.id ? 0.4 : 1)
             .modifier(reorderModifier(id: item.id, name: item.name, beforeID: item.id, sectionHeaderID: nil))
@@ -674,20 +697,31 @@ struct WorkoutPlanView: View {
 
     // MARK: Session log
 
-    private func sessionLogCard(notes: Binding<String>) -> some View {
+    /// Reloads the local notes draft from the current day whenever the user
+    /// navigates to a different day/week, so edits never leak across days.
+    private func syncSessionNotesIfNeeded() {
+        guard sessionNotesKey != dayKey else { return }
+        sessionNotes = selectedDay?.notes ?? ""
+        sessionNotesKey = dayKey
+    }
+
+    private func saveSessionNotes() {
+        let trimmed = sessionNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        mutateSelectedDay { day in day.notes = trimmed }
+        toast = ToastData(message: "Session logged", icon: "checkmark.circle.fill")
+    }
+
+    private var sessionLogCard: some View {
         SectionCard(title: "Session Log", icon: "square.and.pencil") {
             VStack(alignment: .leading, spacing: 12) {
-                TextField("Post-workout notes (e.g. focused on squat form, knee flare-up)…", text: notes, axis: .vertical)
+                TextField("Post-workout notes (e.g. focused on squat form, knee flare-up)…", text: $sessionNotes, axis: .vertical)
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Theme.Color.ink)
                     .lineLimit(5...12)
                     .padding(Theme.Spacing.sm)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
-                Button {
-                    toast = ToastData(message: "Session logged", icon: "checkmark.circle.fill")
-                    notes.wrappedValue = ""
-                } label: {
+                Button(action: saveSessionNotes) {
                     Text("Save Log")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Theme.Color.accentInk)
@@ -696,8 +730,8 @@ struct WorkoutPlanView: View {
                         .background(Theme.Color.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .disabled(notes.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
-                .opacity(notes.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
+                .disabled(sessionNotes.trimmingCharacters(in: .whitespaces).isEmpty)
+                .opacity(sessionNotes.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
             }
         }
     }
@@ -725,8 +759,130 @@ struct WorkoutPlanView: View {
                 }
             }
 
-            sessionLogCard(notes: $freestyleNotes)
+            SectionCard(title: "Logged Exercises", icon: "list.bullet") {
+                VStack(spacing: 10) {
+                    if freestyleItems.isEmpty {
+                        Text("No exercises logged yet for this day.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.Color.inkFaint)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(Array(freestyleItems.enumerated()), id: \.element.id) { index, item in
+                                freestyleItemRow(item)
+                                if index < freestyleItems.count - 1 {
+                                    Rectangle().fill(Theme.Color.hairline).frame(height: 1)
+                                }
+                            }
+                        }
+                    }
+                    freestyleAddRow
+                }
+            }
+
+            saveFreestyleButton
+            sessionLogCard
         }
+    }
+
+    private func freestyleItemRow(_ item: WorkoutExercise) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.system(size: 14.5, weight: .semibold))
+                    .foregroundStyle(Theme.Color.ink)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if !item.detail.isEmpty {
+                        Text(item.detail)
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.Color.inkMuted)
+                    }
+                    if let weightKg = item.weightKg {
+                        Text(WorkoutPlanView.weightLabel(weightKg))
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.Color.accentInk)
+                    }
+                }
+            }
+            Spacer(minLength: 6)
+            if item.weightKg != nil {
+                Button { progressExercise = item } label: {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.Color.accent)
+                }
+                .buttonStyle(.plain)
+            }
+            Button { deleteExercise(item) } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.Color.danger.opacity(0.8))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 8)
+    }
+
+    private var freestyleAddRow: some View {
+        VStack(spacing: 8) {
+            TextField("Exercise name", text: $freestyleName)
+                .font(.system(size: 14.5, weight: .medium))
+                .foregroundStyle(Theme.Color.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+
+            HStack(spacing: 8) {
+                miniField(placeholder: "Sets", text: $freestyleSetsText)
+                miniField(placeholder: "Reps", text: $freestyleRepsText)
+                miniField(placeholder: "Weight (kg)", text: $freestyleWeightText, isDecimal: true)
+            }
+
+            Button(action: addFreestyleExercise) {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus").font(.system(size: 13, weight: .bold))
+                    Text("Add Exercise").font(.system(size: 14, weight: .bold))
+                }
+                .foregroundStyle(Theme.Color.ink)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+            }
+            .buttonStyle(.plain)
+            .disabled(freestyleName.trimmingCharacters(in: .whitespaces).isEmpty)
+            .opacity(freestyleName.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
+        }
+    }
+
+    private func miniField(placeholder: String, text: Binding<String>, isDecimal: Bool = false) -> some View {
+        TextField(placeholder, text: text)
+            .font(.system(size: 13, weight: .bold, design: .rounded))
+            .foregroundStyle(Theme.Color.ink)
+            .multilineTextAlignment(.center)
+            .keyboardType(isDecimal ? .decimalPad : .numberPad)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity)
+            .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var saveFreestyleButton: some View {
+        Button(action: saveFreestyleWorkout) {
+            HStack(spacing: 7) {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 15, weight: .bold))
+                Text("Save Freestyle Workout").font(.system(size: 15, weight: .bold))
+            }
+            .foregroundStyle(Theme.Color.accentInk)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+            .background(Theme.Color.accent, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private static func weightLabel(_ kg: Double) -> String {
+        let trimmed = kg.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(kg)) : String(format: "%.1f", kg)
+        return "\(trimmed) kg"
     }
 
     // MARK: Actions
@@ -774,6 +930,38 @@ struct WorkoutPlanView: View {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { searchSectionID = nil }
             toast = ToastData(message: "Added \(trimmed)", icon: "checkmark.circle.fill")
         }
+    }
+
+    private func addFreestyleExercise() {
+        let trimmed = freestyleName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        insertItem(
+            WorkoutExercise(
+                name: trimmed,
+                sets: Int(freestyleSetsText),
+                reps: Int(freestyleRepsText),
+                category: "Freestyle",
+                kind: .exercise,
+                weightKg: Double(freestyleWeightText)
+            ),
+            underHeaderID: nil
+        )
+        freestyleName = ""
+        freestyleSetsText = ""
+        freestyleRepsText = ""
+        freestyleWeightText = ""
+        toast = ToastData(message: "Added \(trimmed)", icon: "checkmark.circle.fill")
+    }
+
+    private func saveFreestyleWorkout() {
+        if !freestyleName.trimmingCharacters(in: .whitespaces).isEmpty {
+            addFreestyleExercise()
+        }
+        mutateSelectedDay { day in
+            day.notes = sessionNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+            if day.focus == nil || day.focus?.isEmpty == true { day.focus = focus.rawValue }
+        }
+        toast = ToastData(message: "Freestyle workout saved", icon: "checkmark.circle.fill")
     }
 
     private func addRestDay(underHeaderID headerID: UUID) {
@@ -865,11 +1053,12 @@ struct WorkoutPlanView: View {
         toast = ToastData(message: wasNew ? "Added \(result.name)" : "Saved", icon: "checkmark.circle.fill")
     }
 
-    private func updateSetsReps(_ ex: WorkoutExercise, sets: Int?, reps: Int?) {
+    private func updateSetsReps(_ ex: WorkoutExercise, sets: Int?, reps: Int?, weightKg: Double?) {
         mutateSelectedDay { day in
             guard let i = day.exercises.firstIndex(where: { $0.id == ex.id }) else { return }
             day.exercises[i].sets = sets
             day.exercises[i].reps = reps
+            day.exercises[i].weightKg = weightKg
         }
     }
 
@@ -922,21 +1111,32 @@ struct WorkoutPlanView: View {
 private struct BuilderItemRow: View {
     let item: WorkoutExercise
     let isReadOnly: Bool
-    var onCommit: (Int?, Int?) -> Void
+    var onCommit: (Int?, Int?, Double?) -> Void
     var onEdit: () -> Void
     var onDelete: () -> Void
+    var onShowProgress: (() -> Void)?
 
     @State private var setsText: String
     @State private var repsText: String
+    @State private var weightText: String
 
-    init(item: WorkoutExercise, isReadOnly: Bool = false, onCommit: @escaping (Int?, Int?) -> Void, onEdit: @escaping () -> Void, onDelete: @escaping () -> Void) {
+    init(
+        item: WorkoutExercise,
+        isReadOnly: Bool = false,
+        onCommit: @escaping (Int?, Int?, Double?) -> Void,
+        onEdit: @escaping () -> Void,
+        onDelete: @escaping () -> Void,
+        onShowProgress: (() -> Void)? = nil
+    ) {
         self.item = item
         self.isReadOnly = isReadOnly
         self.onCommit = onCommit
         self.onEdit = onEdit
         self.onDelete = onDelete
+        self.onShowProgress = onShowProgress
         _setsText = State(initialValue: item.sets.map(String.init) ?? "")
         _repsText = State(initialValue: item.reps.map(String.init) ?? "")
+        _weightText = State(initialValue: item.weightKg.map { $0.truncatingRemainder(dividingBy: 1) == 0 ? String(Int($0)) : String($0) } ?? "")
     }
 
     var body: some View {
@@ -988,6 +1188,19 @@ private struct BuilderItemRow: View {
                         .font(.system(size: 13.5, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.Color.inkMuted)
                 }
+                if let weightKg = item.weightKg {
+                    Text(BuilderItemRow.weightLabel(weightKg))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.Color.accentInk)
+                }
+                if let onShowProgress {
+                    Button(action: onShowProgress) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.Color.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
             } else {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 12, weight: .bold))
@@ -1016,11 +1229,20 @@ private struct BuilderItemRow: View {
                 }
                 .buttonStyle(.plain)
                 Spacer(minLength: 6)
-                field(placeholder: "Sets", text: $setsText)
+                if let onShowProgress, item.weightKg != nil {
+                    Button(action: onShowProgress) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.Color.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
+                field(placeholder: "Sets", text: $setsText, keyboard: .numberPad)
                 Text("×")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Theme.Color.inkFaint)
-                field(placeholder: "Reps", text: $repsText)
+                field(placeholder: "Reps", text: $repsText, keyboard: .numberPad)
+                field(placeholder: "kg", text: $weightText, keyboard: .decimalPad, width: 52)
                 deleteButton
             }
         }
@@ -1028,13 +1250,13 @@ private struct BuilderItemRow: View {
         .contentShape(Rectangle())
     }
 
-    private func field(placeholder: String, text: Binding<String>) -> some View {
+    private func field(placeholder: String, text: Binding<String>, keyboard: UIKeyboardType, width: CGFloat = 46) -> some View {
         TextField(placeholder, text: text)
             .font(.system(size: 14, weight: .bold, design: .rounded))
             .foregroundStyle(Theme.Color.ink)
             .multilineTextAlignment(.center)
-            .keyboardType(.numberPad)
-            .frame(width: 46)
+            .keyboardType(keyboard)
+            .frame(width: width)
             .padding(.vertical, 7)
             .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: 8))
             .onChange(of: text.wrappedValue) { _, _ in commit() }
@@ -1051,7 +1273,12 @@ private struct BuilderItemRow: View {
     }
 
     private func commit() {
-        onCommit(Int(setsText), Int(repsText))
+        onCommit(Int(setsText), Int(repsText), Double(weightText))
+    }
+
+    static func weightLabel(_ kg: Double) -> String {
+        let trimmed = kg.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(kg)) : String(format: "%.1f", kg)
+        return "\(trimmed) kg"
     }
 }
 
@@ -1172,7 +1399,8 @@ private struct ExerciseEditorSheet: View {
             sets: isHeader ? nil : Int(setsText),
             reps: isHeader ? nil : Int(repsText),
             category: exercise?.category,
-            kind: isHeader ? .header : .exercise
+            kind: isHeader ? .header : .exercise,
+            weightKg: isHeader ? nil : exercise?.weightKg
         )
         onSave(result)
         dismiss()
@@ -1359,5 +1587,171 @@ private struct ReorderModifier: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+// MARK: - Exercise progress sheet
+
+/// Shows logged weight over time for a single exercise, pulled across every
+/// week that's been programmed for this client (matched by library exercise
+/// ID when linked, otherwise by name).
+private struct ExerciseProgressSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(ProfileStore.self) private var profile
+    let client: Client
+    let exerciseName: String
+    let exerciseID: UUID?
+
+    @State private var isLoading = true
+
+    private var points: [(week: Int, weightKg: Double)] {
+        var results: [(Int, Double)] = []
+        let weekCount = profile.workoutWeekCount(for: client.id)
+        for week in 0..<weekCount {
+            let matches = profile.workoutWeek(for: client.id, week: week)
+                .flatMap(\.exercises)
+                .filter { ex in
+                    guard let weightKg = ex.weightKg, weightKg > 0 else { return false }
+                    if let exerciseID, let matchID = ex.exerciseID { return matchID == exerciseID }
+                    return ex.name.caseInsensitiveCompare(exerciseName) == .orderedSame
+                }
+                .compactMap(\.weightKg)
+            if let best = matches.max() {
+                results.append((week, best))
+            }
+        }
+        return results
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: Theme.Spacing.md) {
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if points.count < 2 {
+                    emptyState
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    chartCard
+                    Spacer()
+                }
+            }
+            .padding(Theme.Spacing.md)
+            .background(Theme.Color.background)
+            .navigationTitle(exerciseName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .font(.system(size: 16, weight: .bold))
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .task {
+            let weekCount = profile.workoutWeekCount(for: client.id)
+            for week in 0..<weekCount {
+                await profile.refreshModule(.workout, for: client, week: week)
+            }
+            isLoading = false
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(Theme.Color.inkFaint)
+            Text("Not enough data yet")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Theme.Color.ink)
+            Text("Log a weight for \(exerciseName) across at least two weeks to see a trend here.")
+                .font(.system(size: 13.5, weight: .medium))
+                .foregroundStyle(Theme.Color.inkMuted)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, Theme.Spacing.md)
+    }
+
+    private var chartCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Weight over time")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Theme.Color.inkMuted)
+                Spacer()
+                if let last = points.last {
+                    Text(BuilderItemRow.weightLabel(last.weightKg))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.Color.ink)
+                }
+            }
+            ExerciseTrendChart(values: points.map(\.weightKg))
+            HStack {
+                Text("Week \((points.first?.week ?? 0) + 1)")
+                Spacer()
+                Text("Week \((points.last?.week ?? 0) + 1)")
+            }
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundStyle(Theme.Color.inkFaint)
+        }
+        .padding(Theme.Spacing.md)
+        .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+    }
+}
+
+/// Minimal Path-based line chart (no Swift Charts dependency) matching the
+/// visual language of `WeightTrendChart`.
+private struct ExerciseTrendChart: View {
+    let values: [Double]
+    var height: CGFloat = 150
+
+    private var lo: Double { (values.min() ?? 0) * 0.95 }
+    private var hi: Double { max((values.max() ?? 1) * 1.05, lo + 0.001) }
+
+    private func y(_ value: Double, in h: CGFloat) -> CGFloat {
+        let span = max(hi - lo, 0.001)
+        return h - CGFloat((value - lo) / span) * h
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let pts: [CGPoint] = values.enumerated().map { i, v in
+                let x = values.count <= 1 ? 0 : w * CGFloat(i) / CGFloat(values.count - 1)
+                return CGPoint(x: x, y: y(v, in: h))
+            }
+            ZStack {
+                Path { p in
+                    guard let first = pts.first else { return }
+                    p.move(to: CGPoint(x: 0, y: h))
+                    p.addLine(to: first)
+                    for pt in pts.dropFirst() { p.addLine(to: pt) }
+                    p.addLine(to: CGPoint(x: w, y: h))
+                    p.closeSubpath()
+                }
+                .fill(LinearGradient(colors: [Theme.Color.accent.opacity(0.35), Theme.Color.accent.opacity(0)], startPoint: .top, endPoint: .bottom))
+
+                Path { p in
+                    guard let first = pts.first else { return }
+                    p.move(to: first)
+                    for pt in pts.dropFirst() { p.addLine(to: pt) }
+                }
+                .stroke(Theme.Color.ink, style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
+
+                ForEach(Array(pts.enumerated()), id: \.offset) { index, pt in
+                    Circle()
+                        .fill(index == pts.count - 1 ? Theme.Color.accent : Theme.Color.surface)
+                        .frame(width: index == pts.count - 1 ? 12 : 9, height: index == pts.count - 1 ? 12 : 9)
+                        .overlay(Circle().stroke(Theme.Color.ink, lineWidth: index == pts.count - 1 ? 2.5 : 2))
+                        .position(pt)
+                }
+            }
+            .animation(.spring(response: 0.45, dampingFraction: 0.82), value: values)
+        }
+        .frame(height: height)
     }
 }

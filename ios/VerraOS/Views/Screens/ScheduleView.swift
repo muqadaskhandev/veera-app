@@ -217,7 +217,7 @@ struct ScheduleView: View {
         if !remainingToday.isEmpty {
             return "Today: \(remainingToday.count) left"
         }
-        return packageSessionsRemaining == 0 ? "No credits left" : "Nothing scheduled"
+        return "Nothing scheduled"
     }
 
     private var nextSessionSubtitleIcon: String {
@@ -247,7 +247,7 @@ struct ScheduleView: View {
             .background(Theme.Color.ink, in: RoundedRectangle(cornerRadius: Theme.Radius.lg))
 
             PacingCard(title: "Sessions Remaining") {
-                Text(packageSessionsRemaining == 0 ? "All done" : "\(packageSessionsRemaining)")
+                Text("\(packageSessionsRemaining)")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .foregroundStyle(Theme.Color.ink)
                     .contentTransition(.numericText())

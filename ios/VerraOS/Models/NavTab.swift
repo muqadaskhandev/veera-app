@@ -20,7 +20,7 @@ enum NavTab: Int, CaseIterable, Identifiable {
         case .schedule: return "Schedule"
         case .clients: return "Clients"
         case .messages: return "Messages"
-        case .financials: return "Financials"
+        case .financials: return "Revenue"
         }
     }
 
@@ -49,7 +49,7 @@ enum NavTab: Int, CaseIterable, Identifiable {
         case .schedule: return "Schedule"
         case .clients: return "Clients"
         case .messages: return "Messages"
-        case .financials: return "Financials"
+        case .financials: return "Revenue"
         }
     }
 }

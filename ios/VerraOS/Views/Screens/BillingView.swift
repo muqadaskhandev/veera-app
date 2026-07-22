@@ -7,7 +7,9 @@ import SwiftUI
 
 struct BillingView: View {
     let isPaywall: Bool
-    var onBack: (() -> Void)? = nil
+    /// Called when the paywall's X is tapped. Dismisses the paywall for the
+    /// current session only — it never logs the trainer out.
+    var onDismiss: (() -> Void)? = nil
 
     @Environment(SubscriptionStore.self) private var subscription
     @Environment(\.dismiss) private var dismiss
@@ -22,6 +24,9 @@ struct BillingView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: Theme.Spacing.lg) {
                     header
+                    if isPaywall && !subscription.hasActiveSubscription {
+                        urgencyBanner
+                    }
                     if subscription.hasActiveSubscription && !isPaywall {
                         activeCard
                     } else {
@@ -47,7 +52,7 @@ struct BillingView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if isPaywall {
-                backBar
+                dismissBar
             }
         }
         .task {
@@ -56,30 +61,27 @@ struct BillingView: View {
         }
     }
 
-    private var backBar: some View {
+    private var dismissBar: some View {
         HStack {
+            Spacer()
             Button {
-                if let onBack {
-                    onBack()
+                if let onDismiss {
+                    onDismiss()
                 } else {
                     dismiss()
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 15, weight: .semibold))
-                    Text("Back")
-                        .font(.system(size: 16, weight: .semibold))
-                }
-                .foregroundStyle(Theme.Color.ink)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Theme.Color.ink)
+                    .frame(width: 34, height: 34)
+                    .background(Theme.Color.surface, in: Circle())
+                    .overlay(Circle().stroke(Theme.Color.hairline, lineWidth: 1))
             }
             .buttonStyle(.plain)
-            Spacer()
+            .accessibilityLabel("Dismiss")
         }
-        .padding(.horizontal, Theme.Spacing.sm)
+        .padding(.horizontal, Theme.Spacing.md)
         .padding(.top, 4)
         .padding(.bottom, 4)
         .background(Theme.Color.background.opacity(0.96))
@@ -87,15 +89,53 @@ struct BillingView: View {
 
     private var header: some View {
         VStack(spacing: 10) {
-            Text(isPaywall ? "Unlock Verra Pro" : "Verra Pro")
+            Text(isPaywall ? "Your Clients Are Waiting" : "Verra Pro")
                 .font(.system(size: 30, weight: .bold))
                 .foregroundStyle(Theme.Color.ink)
-            Text("Run your coaching business with scheduling, clients, messaging, and financials.")
+                .multilineTextAlignment(.center)
+            Text(
+                isPaywall
+                    ? "Reactivate Verra Pro to keep scheduling, messaging, and billing your roster without interruption."
+                    : "Run your coaching business with scheduling, clients, messaging, and financials."
+            )
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.Color.inkMuted)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// Urgency framing for the paywall — a bold banner making the cost of
+    /// inaction concrete, plus a limited-time discount callout.
+    private var urgencyBanner: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Theme.Color.danger)
+                Text("Access paused — clients can't book or message you")
+                    .font(.system(size: 13.5, weight: .bold))
+                    .foregroundStyle(Theme.Color.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Theme.Color.danger.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.danger.opacity(0.25), lineWidth: 1))
+
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 12, weight: .bold))
+                Text("LIMITED OFFER · SAVE 20% ON ANNUAL")
+                    .font(.system(size: 11.5, weight: .bold))
+                    .tracking(0.5)
+            }
+            .foregroundStyle(Theme.Color.accentInk)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(Theme.Color.accent, in: Capsule())
+        }
     }
 
     private var activeCard: some View {
@@ -135,9 +175,20 @@ struct BillingView: View {
         } label: {
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(plan.title)
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(Theme.Color.ink)
+                    HStack(spacing: 6) {
+                        Text(plan.title)
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(Theme.Color.ink)
+                        if plan == .annual {
+                            Text("BEST VALUE")
+                                .font(.system(size: 9.5, weight: .bold))
+                                .tracking(0.4)
+                                .foregroundStyle(Theme.Color.accentInk)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Theme.Color.accent, in: Capsule())
+                        }
+                    }
                     Text(plan.subtitle)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.Color.inkMuted)
@@ -151,7 +202,7 @@ struct BillingView: View {
             .background(isSelected ? Theme.Color.accent.opacity(0.35) : Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.md)
-                    .stroke(isSelected ? Theme.Color.accentInk.opacity(0.35) : Theme.Color.hairline, lineWidth: 1)
+                    .stroke(isSelected ? Theme.Color.accentInk.opacity(0.6) : Theme.Color.hairline, lineWidth: isSelected ? 1.6 : 1)
             )
         }
         .buttonStyle(.plain)
@@ -170,16 +221,23 @@ struct BillingView: View {
                         Image(systemName: "apple.logo")
                             .font(.system(size: 18, weight: .semibold))
                     }
-                    Text(isPurchasing ? "Processing…" : "Pay with Apple Pay")
-                        .font(.system(size: 16, weight: .bold))
+                    Text(isPurchasing ? "Processing…" : ctaTitle)
+                        .font(.system(size: 16.5, weight: .bold))
                 }
                 .foregroundStyle(Theme.Color.accentInk)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+                .padding(.vertical, 17)
                 .background(Theme.Color.accent, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+                .shadow(color: Theme.Color.accent.opacity(0.55), radius: 16, x: 0, y: 8)
             }
             .buttonStyle(.plain)
             .disabled(isPurchasing || !subscription.stripeConfigured)
+
+            if isPaywall {
+                Label("Cancel anytime — no long-term commitment", systemImage: "checkmark.shield.fill")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(Theme.Color.inkMuted)
+            }
 
             if !subscription.stripeConfigured {
                 Text("Add your Stripe keys to the server environment to enable checkout.")
@@ -193,6 +251,10 @@ struct BillingView: View {
                     .multilineTextAlignment(.center)
             }
         }
+    }
+
+    private var ctaTitle: String {
+        isPaywall ? "Unlock Verra Pro Now" : "Pay with Apple Pay"
     }
 
     private var features: some View {
@@ -244,3 +306,4 @@ struct BillingView: View {
     BillingView(isPaywall: true)
         .environment(SubscriptionStore())
 }
+

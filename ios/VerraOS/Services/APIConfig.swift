@@ -6,7 +6,7 @@ enum APIConfig {
         #if targetEnvironment(simulator)
         URL(string: "http://127.0.0.1:8080")!
         #else
-        URL(string: "https://bird-wealth-cindy-redhead.trycloudflare.com")!
+        URL(string: "https://underwear-deviation-travel-came.trycloudflare.com")!
         #endif
     }()
 }

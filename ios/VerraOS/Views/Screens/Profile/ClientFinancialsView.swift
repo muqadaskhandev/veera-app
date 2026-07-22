@@ -99,6 +99,7 @@ struct ClientFinancialsView: View {
             }
             .frame(maxHeight: .infinity)
             .tabScrollContent()
+            .dismissKeyboardOnScroll()
             .refreshable {
                 await refreshFinancials()
             }
@@ -421,9 +422,11 @@ struct ClientFinancialsView: View {
                 .foregroundStyle(Theme.Color.ink)
                 .lineLimit(1)
             Spacer(minLength: 6)
-            Text(entry.date.formatted(.dateTime.month(.abbreviated).day()))
+            Text(entry.date.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
                 .font(.system(size: 11.5, weight: .medium))
                 .foregroundStyle(Theme.Color.inkFaint)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             Text(entry.delta > 0 ? "+\(entry.delta)" : "\(entry.delta)")
                 .font(.system(size: 13.5, weight: .bold, design: .rounded))
                 .foregroundStyle(entry.delta > 0 ? Color(hex: 0x57C77B) : Theme.Color.ink)
@@ -441,8 +444,17 @@ struct ClientFinancialsView: View {
     // MARK: Actions
 
     private func adjust(_ delta: Int, _ client: Client) {
+        // Update the bank and toast immediately so the UI feels instant, then
+        // sync with the backend and roll back if the request fails.
+        clientStore.adjustSessionsRemaining(by: delta, for: client.id)
+        let optimisticRemaining = clientStore.clients.first(where: { $0.id == client.id })?.sessionsRemaining ?? 0
+        toast = ToastData(message: "Bank: \(optimisticRemaining) left", icon: delta > 0 ? "plus.circle.fill" : "minus.circle.fill")
+
         Task { @MainActor in
-            guard let token = AuthStore.accessToken else { return }
+            guard let token = AuthStore.accessToken else {
+                clientStore.adjustSessionsRemaining(by: -delta, for: client.id)
+                return
+            }
             let kind = delta > 0 ? "adjustment" : "usage"
             let title = delta > 0 ? "Manual Adjustment" : "Session Used"
             do {
@@ -469,9 +481,9 @@ struct ClientFinancialsView: View {
                     kind: delta > 0 ? .adjustment : .sessionUsed
                 )
                 profile.addLedgerEntry(entry, for: client.id)
-                let remaining = clientStore.clients.first(where: { $0.id == client.id })?.sessionsRemaining ?? 0
-                toast = ToastData(message: "Bank: \(remaining) left", icon: delta > 0 ? "plus.circle.fill" : "minus.circle.fill")
             } catch {
+                // Roll back the optimistic change since the server never confirmed it.
+                clientStore.adjustSessionsRemaining(by: -delta, for: client.id)
                 toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.circle.fill")
             }
         }
@@ -481,8 +493,16 @@ struct ClientFinancialsView: View {
         let count = Int(countText) ?? 0
         let price = Double(priceText) ?? 0
         guard count > 0 else { return }
+
+        // Optimistic bump — the calculator input is cleared right away too.
+        clientStore.adjustSessionsRemaining(by: count, for: client.id)
+        toast = ToastData(message: "Added \(count) sessions", icon: "plus.circle.fill")
+
         Task { @MainActor in
-            guard let token = AuthStore.accessToken else { return }
+            guard let token = AuthStore.accessToken else {
+                clientStore.adjustSessionsRemaining(by: -count, for: client.id)
+                return
+            }
             do {
                 let event = try await VerraAPI.createFinancialEvent(
                     VerraAPI.CreateFinancialEventBody(
@@ -507,8 +527,9 @@ struct ClientFinancialsView: View {
                     kind: .packageAdded
                 )
                 profile.addLedgerEntry(entry, for: client.id)
-                toast = ToastData(message: "Added \(count) sessions", icon: "plus.circle.fill")
             } catch {
+                // Roll back the optimistic bump since the server never confirmed it.
+                clientStore.adjustSessionsRemaining(by: -count, for: client.id)
                 toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.circle.fill")
             }
         }

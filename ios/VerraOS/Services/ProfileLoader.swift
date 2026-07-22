@@ -75,23 +75,23 @@ struct ProfileResponse: Codable {
 }
 
 struct UpdateProfileBody: Encodable {
-    var displayName: String?
-    var name: String?
-    var title: String?
-    var bio: String?
-    var specialties: [String]?
-    var phone: String?
-    var primaryGoal: String?
-    var gender: String?
-    var injuryHistory: String?
-    var skillLevel: String?
-    var age: Int?
-    var heightCm: Int?
-    var weightKg: Int?
-    var goalWeightKg: Int?
-    var weightUnit: String?
-    var biometricLoginEnabled: Bool?
-    var calendarPrefsJSON: String?
+    var displayName: String? = nil
+    var name: String? = nil
+    var title: String? = nil
+    var bio: String? = nil
+    var specialties: [String]? = nil
+    var phone: String? = nil
+    var primaryGoal: String? = nil
+    var gender: String? = nil
+    var injuryHistory: String? = nil
+    var skillLevel: String? = nil
+    var age: Int? = nil
+    var heightCm: Int? = nil
+    var weightKg: Int? = nil
+    var goalWeightKg: Int? = nil
+    var weightUnit: String? = nil
+    var biometricLoginEnabled: Bool? = nil
+    var calendarPrefsJSON: String? = nil
 }
 
 enum ProfileLoader {

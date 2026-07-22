@@ -18,18 +18,33 @@ final class MessageStore {
     /// Bumped on local unread changes so an in-flight poll can't wipe a newer WS update.
     private var inboxEpoch = 0
 
+    /// Locally-persisted archive/delete state — the backend has no concept of
+    /// either yet, so these live in UserDefaults keyed by conversation ID.
+    private static let archivedDefaultsKey = "com.verraos.archivedConversationIDs"
+    private static let deletedDefaultsKey = "com.verraos.deletedConversationIDs"
+    private var archivedIDs: Set<UUID>
+    private var deletedIDs: Set<UUID>
+
     init(conversations: [Conversation] = []) {
-        self.conversations = conversations
+        let archived = Self.loadIDSet(key: Self.archivedDefaultsKey)
+        let deleted = Self.loadIDSet(key: Self.deletedDefaultsKey)
+        self.archivedIDs = archived
+        self.deletedIDs = deleted
+        self.conversations = conversations.map { convo in
+            var convo = convo
+            convo.isArchived = archived.contains(convo.id)
+            return convo
+        }
     }
 
     /// Total unread messages across the inbox (local tallies; server only stores a boolean flag).
     var unreadCount: Int {
-        conversations.reduce(0) { $0 + max(0, $1.unreadMessageCount) }
+        conversations.reduce(0) { $0 + (($1.isArchived) ? 0 : max(0, $1.unreadMessageCount)) }
     }
 
-    /// Search by client name; sorted most-recent first.
+    /// Search by client name; sorted most-recent first. Excludes archived threads.
     func inbox(search: String) -> [Conversation] {
-        var result = conversations
+        var result = conversations.filter { !$0.isArchived }
         let query = search.trimmingCharacters(in: .whitespaces)
         if !query.isEmpty {
             result = result.filter { $0.clientName.localizedCaseInsensitiveContains(query) }
@@ -37,8 +52,68 @@ final class MessageStore {
         return result.sorted { ($0.lastMessageAt ?? $0.lastActiveAt) > ($1.lastMessageAt ?? $1.lastActiveAt) }
     }
 
+    /// Archived threads only, most-recent first.
+    func archivedInbox(search: String = "") -> [Conversation] {
+        var result = conversations.filter { $0.isArchived }
+        let query = search.trimmingCharacters(in: .whitespaces)
+        if !query.isEmpty {
+            result = result.filter { $0.clientName.localizedCaseInsensitiveContains(query) }
+        }
+        return result.sorted { ($0.lastMessageAt ?? $0.lastActiveAt) > ($1.lastMessageAt ?? $1.lastActiveAt) }
+    }
+
+    var hasArchivedConversations: Bool {
+        conversations.contains { $0.isArchived }
+    }
+
     func conversation(id: UUID) -> Conversation? {
         conversations.first { $0.id == id }
+    }
+
+    // MARK: Archive / delete
+
+    @MainActor
+    func archive(_ id: UUID) {
+        archivedIDs.insert(id)
+        persist(archivedIDs, key: Self.archivedDefaultsKey)
+        if let index = conversations.firstIndex(where: { $0.id == id }) {
+            conversations[index].isArchived = true
+        }
+    }
+
+    @MainActor
+    func unarchive(_ id: UUID) {
+        archivedIDs.remove(id)
+        persist(archivedIDs, key: Self.archivedDefaultsKey)
+        if let index = conversations.firstIndex(where: { $0.id == id }) {
+            conversations[index].isArchived = false
+        }
+    }
+
+    @MainActor
+    func delete(_ id: UUID) {
+        deletedIDs.insert(id)
+        archivedIDs.remove(id)
+        persist(deletedIDs, key: Self.deletedDefaultsKey)
+        persist(archivedIDs, key: Self.archivedDefaultsKey)
+        conversations.removeAll { $0.id == id }
+    }
+
+    private static func loadIDSet(key: String) -> Set<UUID> {
+        let raw = UserDefaults.standard.stringArray(forKey: key) ?? []
+        return Set(raw.compactMap(UUID.init(uuidString:)))
+    }
+
+    private func persist(_ ids: Set<UUID>, key: String) {
+        UserDefaults.standard.set(ids.map(\.uuidString), forKey: key)
+    }
+
+    /// Clears a previously-deleted flag when the trainer actively re-engages
+    /// with a thread (opens it or sends a message), so it isn't silently
+    /// dropped again on the next server refresh.
+    private func undeleteIfNeeded(_ id: UUID) {
+        guard deletedIDs.remove(id) != nil else { return }
+        persist(deletedIDs, key: Self.deletedDefaultsKey)
     }
 
     // MARK: Server sync
@@ -76,6 +151,7 @@ final class MessageStore {
 
             var merged: [Conversation] = []
             for dto in dtos {
+                guard !deletedIDs.contains(dto.id) else { continue }
                 if let existing = conversations.first(where: { $0.id == dto.id }) {
                     // Server only has a boolean; keep the local tally while still unread.
                     let unreadCount: Int
@@ -94,9 +170,12 @@ final class MessageStore {
                         convo.otherParticipantIsOnline = true
                         convo.otherParticipantLastSeen = nil
                     }
+                    convo.isArchived = archivedIDs.contains(dto.id)
                     merged.append(convo)
                 } else {
-                    merged.append(MessageLoader.conversation(from: dto))
+                    var convo = MessageLoader.conversation(from: dto)
+                    convo.isArchived = archivedIDs.contains(dto.id)
+                    merged.append(convo)
                 }
             }
             conversations = merged
@@ -115,6 +194,7 @@ final class MessageStore {
     func loadMessages(for conversationID: UUID) async {
         guard let token = AuthStore.accessToken else { return }
         activeConversationID = conversationID
+        undeleteIfNeeded(conversationID)
         do {
             let page = try await VerraAPI.fetchMessages(conversationID: conversationID, accessToken: token)
             applyMessages(page.messages.map(MessageLoader.message(from:)), to: conversationID)
@@ -131,6 +211,10 @@ final class MessageStore {
             return existing.id
         }
         guard let token = AuthStore.accessToken else {
+            // Re-check for a race-created local conversation before minting a new one.
+            if let existing = conversations.first(where: { $0.clientID == client.id }) {
+                return existing.id
+            }
             let convo = Conversation(
                 id: UUID(),
                 clientID: client.id,
@@ -151,6 +235,13 @@ final class MessageStore {
             }
             return convo.id
         } catch {
+            // The server call failed — prefer reusing any conversation for this
+            // client that already exists locally (e.g. from a concurrent call
+            // or a since-completed refresh) instead of minting another local
+            // placeholder, which would otherwise produce duplicate threads.
+            if let existing = conversations.first(where: { $0.clientID == client.id }) {
+                return existing.id
+            }
             let convo = Conversation(
                 id: UUID(),
                 clientID: client.id,
@@ -191,6 +282,7 @@ final class MessageStore {
 
     @MainActor
     func send(_ kind: MessageKind, to id: UUID, attachmentURL: String? = nil) async {
+        undeleteIfNeeded(id)
         guard let token = AuthStore.accessToken else {
             enqueueOffline(kind: kind, conversationID: id, attachmentURL: attachmentURL)
             return

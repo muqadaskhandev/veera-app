@@ -93,6 +93,8 @@ struct Conversation: Identifiable, Hashable {
     var otherParticipantIsOnline: Bool
     var otherParticipantLastSeen: Date?
     var otherParticipantAvatarURL: String?
+    /// Locally-persisted archive flag (no backend support yet).
+    var isArchived: Bool = false
 
     /// Presence label for the chat header.
     var presenceLabel: String {

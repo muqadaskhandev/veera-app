@@ -34,9 +34,11 @@ struct NutritionPlanView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.sm)
+                .padding(.bottom, Theme.Spacing.xl)
             }
             .frame(maxHeight: .infinity)
             .tabScrollContent()
+            .dismissKeyboardOnScroll()
         }
         .background(Theme.Color.background)
         .toast($toast)

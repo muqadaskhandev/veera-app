@@ -129,6 +129,19 @@ enum VerraAPI {
         )
     }
 
+    struct UsernameAvailabilityResponse: Decodable {
+        let available: Bool
+        let username: String
+    }
+
+    /// Public check used by the email sign-up screen (debounced as the user types).
+    static func checkUsernameAvailability(_ username: String) async throws -> UsernameAvailabilityResponse {
+        let encoded = username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? username
+        return try await APIClient.shared.request(
+            "/api/auth/username-availability?username=\(encoded)"
+        )
+    }
+
     static func registerTrainer(email: String, password: String, displayName: String) async throws -> RegisterResponse {
         try await APIClient.shared.request(
             "/api/auth/register",
@@ -498,6 +511,18 @@ enum VerraAPI {
         )
     }
 
+    struct InviteLinkResponse: Decodable {
+        let code: String
+        let url: String
+    }
+
+    static func fetchInviteLink(clientID: UUID, accessToken: String) async throws -> InviteLinkResponse {
+        try await APIClient.shared.request(
+            "/api/clients/\(clientID.uuidString)/invite-link",
+            token: accessToken
+        )
+    }
+
     static func createInvite(
         clientEmail: String?,
         clientName: String?,
@@ -857,6 +882,7 @@ enum VerraAPI {
         let sets: Int?
         let reps: Int?
         let kind: String
+        let weightKg: Double?
     }
 
     struct WorkoutDayDTO: Codable {
@@ -864,6 +890,7 @@ enum VerraAPI {
         let label: String
         let focus: String?
         let exercises: [WorkoutExerciseDTO]
+        let notes: String?
     }
 
     struct WorkoutWeekResponse: Codable {

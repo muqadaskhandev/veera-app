@@ -4,6 +4,26 @@ import JWTKit
 import Vapor
 
 enum AuthService {
+    static func checkUsernameAvailability(_ username: String, on database: any Database) async throws -> UsernameAvailabilityResponse {
+        let trimmed = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 3 else {
+            throw Abort(.badRequest, reason: "Username must be at least 3 characters")
+        }
+
+        // Case-insensitive exact match (Postgres ILIKE without wildcards).
+        let userTaken = try await User.query(on: database)
+            .filter(\.$displayName, .custom("ILIKE"), trimmed)
+            .first() != nil
+        let profileTaken = try await Profile.query(on: database)
+            .filter(\.$displayName, .custom("ILIKE"), trimmed)
+            .first() != nil
+
+        return UsernameAvailabilityResponse(
+            available: !(userTaken || profileTaken),
+            username: trimmed
+        )
+    }
+
     static func register(
         email: String,
         password: String,
@@ -475,6 +495,11 @@ struct RegisterRequest: Content {
     var displayName: String
     var inviteCode: String?
     var adminSetupSecret: String?
+}
+
+struct UsernameAvailabilityResponse: Content {
+    let available: Bool
+    let username: String
 }
 
 struct LoginRequest: Content {

@@ -48,6 +48,26 @@ private struct OBQuestion {
     let number: Int
     let headline: [Seg]
     let options: [OBOption]
+    /// Whether more than one option may be selected (e.g. coaching focus).
+    let allowsMultiple: Bool
+    /// Whether choosing the "Other" option reveals a free-text field.
+    let allowsOtherText: Bool
+
+    init(
+        key: String,
+        number: Int,
+        headline: [Seg],
+        options: [OBOption],
+        allowsMultiple: Bool = false,
+        allowsOtherText: Bool = false
+    ) {
+        self.key = key
+        self.number = number
+        self.headline = headline
+        self.options = options
+        self.allowsMultiple = allowsMultiple
+        self.allowsOtherText = allowsOtherText
+    }
 }
 
 /// The distinct screens that can appear in the flow.
@@ -57,7 +77,9 @@ private enum OBScreen {
     case hello
     case question(OBQuestion)
     case notifications(number: Int)
+    case profileSetup
     case register
+    case registerEmail
 }
 
 /// Which lightweight in-app mockup a preview screen renders.
@@ -65,6 +87,16 @@ private enum PreviewMock {
     case clientProfile
     case financials
     case messages
+}
+
+/// Live status of the username availability check on the email sign-up screen.
+private enum UsernameAvailability: Equatable {
+    case idle
+    case checking
+    case available
+    case taken
+    case tooShort
+    case checkFailed
 }
 
 struct OnboardingView: View {
@@ -85,10 +117,18 @@ struct OnboardingView: View {
     @State private var notificationsResolved = false
     @State private var notificationsDenied = false
     @State private var agreedToComms = true
-    @State private var showingEmailFields = false
-    @State private var registerName = ""
+    @State private var selectedFocusOptions: Set<String> = []
+    @State private var referralOtherText = ""
+    @State private var profileDisplayName = ""
+    @State private var profileJobTitle = ""
+    @State private var profileBio = ""
+    @State private var profileSpecialties: Set<Specialty> = []
+    @State private var registerUsername = ""
     @State private var registerEmail = ""
     @State private var registerPassword = ""
+    @State private var registerPasswordConfirm = ""
+    @State private var usernameCheckTask: Task<Void, Never>?
+    @State private var usernameAvailability: UsernameAvailability = .idle
     @State private var isSaving = false
     @State private var saveError: String?
     @State private var showingEmailCodeEntry = false
@@ -109,13 +149,16 @@ struct OnboardingView: View {
     @State private var resetPasswordConfirm = ""
     @State private var successMessage: String?
 
-    private let questionTotal = 7
+    @Environment(\.openURL) private var openURL
+    private let legalURL = URL(string: "https://verraos.app/legal")!
+
+    private let questionTotal = 8
 
     // MARK: Screen list
 
     private var screens: [OBScreen] {
         if role == .client {
-            return [.invite, .register]
+            return [.invite, .register, .registerEmail]
         }
         return [
             .preview(
@@ -158,7 +201,18 @@ struct OnboardingView: View {
                 options: [OBOption("Male"), OBOption("Female")]
             )),
             .question(OBQuestion(
-                key: "tenure", number: 2,
+                key: "age", number: 2,
+                headline: [Seg("What's your "), Seg("age range", accent: true), Seg("?")],
+                options: [
+                    OBOption("18 – 24"),
+                    OBOption("25 – 34"),
+                    OBOption("35 – 44"),
+                    OBOption("45 – 54"),
+                    OBOption("55+"),
+                ]
+            )),
+            .question(OBQuestion(
+                key: "tenure", number: 3,
                 headline: [Seg("How long have you been a "), Seg("personal trainer", accent: true), Seg("?")],
                 options: [
                     OBOption("Less than 1 year"),
@@ -168,7 +222,7 @@ struct OnboardingView: View {
                 ]
             )),
             .question(OBQuestion(
-                key: "location", number: 3,
+                key: "location", number: 4,
                 headline: [Seg("Where do you primarily "), Seg("train your clients", accent: true), Seg("?")],
                 options: [
                     OBOption("Commercial Gym", "Big-box or chain facilities"),
@@ -178,37 +232,36 @@ struct OnboardingView: View {
                 ]
             )),
             .question(OBQuestion(
-                key: "clients", number: 4,
+                key: "clients", number: 5,
                 headline: [Seg("How many "), Seg("active clients", accent: true), Seg(" do you currently manage?")],
                 options: [
-                    OBOption("1–5 clients"),
-                    OBOption("6–15 clients"),
-                    OBOption("16–30 clients"),
-                    OBOption("31+ clients"),
+                    OBOption("1 – 5 Clients"),
+                    OBOption("6 – 15 Clients"),
+                    OBOption("16 – 30 Clients"),
+                    OBOption("31+ Clients"),
                 ]
             )),
             .question(OBQuestion(
-                key: "focus", number: 5,
+                key: "focus", number: 6,
                 headline: [Seg("What is your primary "), Seg("coaching focus", accent: true), Seg("?")],
-                options: [
-                    OBOption("Strength & Muscle Building", "Hypertrophy and getting stronger"),
-                    OBOption("Weight Loss & Toning", "Fat loss and body composition"),
-                    OBOption("Athletic Performance", "Speed, power, and sport-specific"),
-                    OBOption("General Health & Longevity", "Wellness, mobility, and healthy aging"),
-                ]
+                options: CoachingFocus.allCases.map { OBOption($0.rawValue, $0.subtitle) },
+                allowsMultiple: true
             )),
             .question(OBQuestion(
-                key: "referral", number: 6,
+                key: "referral", number: 7,
                 headline: [Seg("How did you "), Seg("hear about us", accent: true), Seg("?")],
                 options: [
                     OBOption("Word of mouth / Another trainer"),
                     OBOption("Instagram / Social media"),
                     OBOption("Online search"),
                     OBOption("Other"),
-                ]
+                ],
+                allowsOtherText: true
             )),
-            .notifications(number: 7),
+            .profileSetup,
+            .notifications(number: 8),
             .register,
+            .registerEmail,
         ]
     }
 
@@ -364,8 +417,12 @@ struct OnboardingView: View {
             questionBody(q)
         case .notifications(let number):
             notificationsBody(number: number)
+        case .profileSetup:
+            profileSetupBody
         case .register:
             registerBody
+        case .registerEmail:
+            registerEmailBody
         }
     }
 
@@ -764,12 +821,17 @@ struct OnboardingView: View {
                     ForEach(q.options) { option in
                         OptionCard(
                             option: option,
-                            isSelected: answers[q.key] == option.id
+                            isSelected: isOptionSelected(q, option)
                         ) {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                answers[q.key] = option.id
+                                toggleOption(q, option)
                             }
                         }
+                    }
+
+                    if q.allowsOtherText, isOtherSelected(q) {
+                        registerField("Tell us more…", text: $referralOtherText)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
                 .padding(.top, 28)
@@ -778,6 +840,35 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 28)
         .opacity(appeared ? 1 : 0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isOtherSelected(q))
+    }
+
+    /// Whether a single option within a question is currently selected.
+    private func isOptionSelected(_ q: OBQuestion, _ option: OBOption) -> Bool {
+        if q.allowsMultiple {
+            return selectedFocusOptions.contains(option.id)
+        }
+        return answers[q.key] == option.id
+    }
+
+    /// Whether the "Other" option is selected for a question that allows free text.
+    private func isOtherSelected(_ q: OBQuestion) -> Bool {
+        guard q.allowsOtherText else { return false }
+        return answers[q.key] == "Other"
+    }
+
+    /// Toggles an option's selection, keeping `selectedFocusOptions` and `answers` in sync.
+    private func toggleOption(_ q: OBQuestion, _ option: OBOption) {
+        if q.allowsMultiple {
+            if selectedFocusOptions.contains(option.id) {
+                selectedFocusOptions.remove(option.id)
+            } else {
+                selectedFocusOptions.insert(option.id)
+            }
+            answers[q.key] = selectedFocusOptions.sorted().joined(separator: ", ")
+        } else {
+            answers[q.key] = option.id
+        }
     }
 
     // MARK: Notifications primer
@@ -860,12 +951,8 @@ struct OnboardingView: View {
                     Task { await handleAppleSignInResult(result, isLogin: false) }
                 }
 
-                Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        showingEmailFields.toggle()
-                    }
-                }) {
-                    Text(showingEmailFields ? "Hide Email Form" : "Continue with Email")
+                Button(action: { advanceToNextScreen() }) {
+                    Text("Continue with Email")
                         .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.Color.accentInk)
                         .frame(maxWidth: .infinity)
@@ -874,36 +961,6 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isSaving)
-
-                if showingEmailFields {
-                    VStack(spacing: 12) {
-                        registerField("Display name", text: $registerName)
-                        registerField("Email", text: $registerEmail)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.emailAddress)
-                        passwordField(
-                            "Password (8+ characters)",
-                            text: $registerPassword,
-                            hasError: registerPasswordTooShort
-                        )
-
-                        passwordValidationMessages(password: registerPassword, confirm: nil)
-
-                        Button(action: { Task { await signUpWithEmail() } }) {
-                            Text(isSaving ? "Saving…" : "Save & Continue")
-                                .font(.system(size: 17, weight: .bold, design: .rounded))
-                                .foregroundStyle(Theme.Color.accentInk)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(Theme.Color.accent, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isSaving || !canSubmitEmail)
-                        .opacity(canSubmitEmail ? 1 : 0.45)
-                    }
-                    .padding(.top, 4)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
             }
             .padding(.top, 36)
 
@@ -936,12 +993,195 @@ struct OnboardingView: View {
 
             Spacer()
 
-            Text("By continuing, you agree to our **Terms of Use and Privacy Policy**")
+            legalFooter
+        }
+    }
+
+    // MARK: Register with email
+
+    private var registerEmailBody: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                (
+                    Text("Create your account\n").foregroundStyle(.white)
+                    + Text("with your email").foregroundStyle(.white.opacity(0.45))
+                )
+                .font(.system(size: 34, weight: .black))
+                .fontWidth(.condensed)
+                .textCase(.uppercase)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+
+                if let invitedEmailForCode, validatedInviteCode != nil {
+                    inviteEmailHint(invitedEmailForCode)
+                        .padding(.top, 18)
+                }
+
+                VStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        registerField("Username", text: $registerUsername)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .onAppear {
+                                scheduleUsernameCheck(registerUsername)
+                            }
+                            .onChange(of: registerUsername) { _, newValue in
+                                scheduleUsernameCheck(newValue)
+                            }
+
+                        if let usernameStatusText {
+                            HStack(spacing: 6) {
+                                Image(systemName: usernameStatusIcon)
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text(usernameStatusText)
+                                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundStyle(usernameStatusColor)
+                            .padding(.horizontal, 4)
+                        }
+                    }
+
+                    registerField("Email", text: $registerEmail)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+
+                    passwordField(
+                        "Password (8+ characters)",
+                        text: $registerPassword,
+                        hasError: registerPasswordTooShort
+                    )
+                    passwordField(
+                        "Confirm password",
+                        text: $registerPasswordConfirm,
+                        hasError: registerPasswordMismatch
+                    )
+
+                    passwordValidationMessages(password: registerPassword, confirm: registerPasswordConfirm)
+
+                    Button(action: { Task { await signUpWithEmail() } }) {
+                        Text(isSaving ? "Saving…" : "Save & Continue")
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.Color.accentInk)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Theme.Color.accent, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSaving || !canSubmitEmail)
+                    .opacity(canSubmitEmail ? 1 : 0.45)
+                }
+                .padding(.top, 28)
+
+                Spacer(minLength: 32)
+
+                legalFooter
+                    .padding(.bottom, 8)
+            }
+            .padding(.horizontal, 28)
+        }
+        .opacity(appeared ? 1 : 0)
+    }
+
+    /// Shared Terms of Use / Privacy Policy footer for both register screens.
+    private var legalFooter: some View {
+        VStack(spacing: 4) {
+            Text("By continuing, you agree to our")
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(.white.opacity(0.5))
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            HStack(spacing: 4) {
+                Button(action: { openURL(legalURL) }) {
+                    Text("Terms of Use")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.Color.accent)
+                }
+                .buttonStyle(.plain)
+                Text("and")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.5))
+                Button(action: { openURL(legalURL) }) {
+                    Text("Privacy Policy")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.Color.accent)
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    // MARK: Profile setup
+
+    private var profileSetupBody: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                headlineText([
+                    Seg("Set up your "),
+                    Seg("public profile", accent: true),
+                ], size: 30)
+                .padding(.top, 8)
+
+                Text("This is how clients will see you. You can always edit it later.")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.top, 12)
+
+                VStack(spacing: 14) {
+                    registerField("Display name", text: $profileDisplayName)
+                    registerField("Job title", text: $profileJobTitle)
+                    multilineField("Short bio", text: $profileBio)
+                }
+                .padding(.top, 28)
+
+                Text("SPECIALTIES")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .tracking(1)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .padding(.top, 28)
+
+                FlowChips(items: Specialty.allCases) { specialty in
+                    let selected = profileSpecialties.contains(specialty)
+                    onboardingChip(label: specialty.rawValue, selected: selected) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            if selected { profileSpecialties.remove(specialty) }
+                            else { profileSpecialties.insert(specialty) }
+                        }
+                    }
+                }
+                .padding(.top, 12)
+
+                Spacer(minLength: 24)
+            }
+            .padding(.horizontal, 28)
+            .padding(.bottom, 8)
+        }
+        .opacity(appeared ? 1 : 0)
+    }
+
+    private func onboardingChip(label: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(selected ? Theme.Color.accentInk : .white.opacity(0.85))
+                .padding(.horizontal, 15)
+                .padding(.vertical, 10)
+                .background(selected ? Theme.Color.accent : Color.white.opacity(0.08), in: Capsule())
+                .overlay(Capsule().stroke(selected ? Color.clear : .white.opacity(0.18), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func multilineField(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField("", text: text, prompt: Text(placeholder).foregroundColor(.white.opacity(0.4)), axis: .vertical)
+            .lineLimit(3...6)
+            .font(.system(size: 16, weight: .medium, design: .rounded))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.md)
+                    .stroke(.white.opacity(0.18), lineWidth: 1)
+            )
     }
 
     private var emailCodeEntryBody: some View {
@@ -1050,6 +1290,23 @@ struct OnboardingView: View {
                         }
                     }
                 }
+            case .registerEmail:
+                if showingEmailCodeEntry {
+                    HStack {
+                        backButton
+                        Spacer()
+                    }
+                } else {
+                    VStack(spacing: 14) {
+                        existingAccountLoginLink
+                        HStack {
+                            backButton
+                            Spacer()
+                        }
+                    }
+                }
+            case .profileSetup:
+                controlRowWithLogin(label: "Next")
             case .hello:
                 controlRowWithLogin(label: "I'M READY")
             case .invite:
@@ -1082,7 +1339,19 @@ struct OnboardingView: View {
     private var canAdvance: Bool {
         switch current {
         case .question(let q):
-            return answers[q.key] != nil
+            if q.allowsMultiple {
+                return !(answers[q.key]?.isEmpty ?? true)
+            }
+            guard let value = answers[q.key] else { return false }
+            if q.allowsOtherText, value == "Other" {
+                return !referralOtherText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            return true
+        case .profileSetup:
+            return !profileDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !profileJobTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !profileBio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !profileSpecialties.isEmpty
         default:
             return true
         }
@@ -1173,6 +1442,9 @@ struct OnboardingView: View {
                 Task { await validateInviteAndAdvance() }
                 return
             }
+        }
+        if case .question(let q) = current, q.allowsOtherText, answers[q.key] == "Other" {
+            answers[q.key] = referralOtherText.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         advanceToNextScreen()
     }
@@ -1291,6 +1563,10 @@ struct OnboardingView: View {
             Task { @MainActor in
                 notificationsResolved = granted
                 notificationsDenied = !granted
+                if granted {
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    advanceToNextScreen()
+                }
             }
         }
     }
@@ -1355,13 +1631,22 @@ struct OnboardingView: View {
     }
 
     private var canSubmitEmail: Bool {
-        !registerName.trimmingCharacters(in: .whitespaces).isEmpty
+        !registerUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && usernameAvailability == .available
+            && !registerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && registerEmail.contains("@")
+            && !registerPassword.isEmpty
             && registerPassword.count >= 8
+            && !registerPasswordConfirm.isEmpty
+            && registerPassword == registerPasswordConfirm
     }
 
     private var registerPasswordTooShort: Bool {
         !registerPassword.isEmpty && registerPassword.count < 8
+    }
+
+    private var registerPasswordMismatch: Bool {
+        !registerPasswordConfirm.isEmpty && registerPassword != registerPasswordConfirm
     }
 
     private var resetPasswordTooShort: Bool {
@@ -1370,6 +1655,65 @@ struct OnboardingView: View {
 
     private var resetPasswordMismatch: Bool {
         !resetPasswordConfirm.isEmpty && resetPassword != resetPasswordConfirm
+    }
+
+    /// Debounces a username availability lookup ~400ms after the user stops typing.
+    private func scheduleUsernameCheck(_ value: String) {
+        usernameCheckTask?.cancel()
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmed.isEmpty else {
+            usernameAvailability = .idle
+            return
+        }
+        guard trimmed.count >= 3 else {
+            usernameAvailability = .tooShort
+            return
+        }
+
+        usernameAvailability = .checking
+        usernameCheckTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            do {
+                let response = try await VerraAPI.checkUsernameAvailability(trimmed)
+                guard !Task.isCancelled else { return }
+                usernameAvailability = response.available ? .available : .taken
+            } catch {
+                guard !Task.isCancelled else { return }
+                usernameAvailability = .checkFailed
+            }
+        }
+    }
+
+    private var usernameStatusText: String? {
+        switch usernameAvailability {
+        case .idle: return nil
+        case .checking: return "Checking…"
+        case .available: return "Username available"
+        case .taken: return "Username taken"
+        case .tooShort: return "At least 3 characters"
+        case .checkFailed: return "Couldn't verify username"
+        }
+    }
+
+    private var usernameStatusIcon: String {
+        switch usernameAvailability {
+        case .available: return "checkmark.circle.fill"
+        case .taken, .tooShort: return "exclamationmark.circle.fill"
+        case .checkFailed: return "exclamationmark.triangle.fill"
+        case .checking: return "ellipsis.circle"
+        case .idle: return "circle"
+        }
+    }
+
+    private var usernameStatusColor: Color {
+        switch usernameAvailability {
+        case .available: return Theme.Color.accent
+        case .taken, .tooShort: return Theme.Color.danger
+        case .checkFailed: return Theme.Color.danger.opacity(0.85)
+        case .checking, .idle: return .white.opacity(0.6)
+        }
     }
 
     private func passwordField(_ placeholder: String, text: Binding<String>, hasError: Bool = false) -> some View {
@@ -1421,7 +1765,7 @@ struct OnboardingView: View {
         defer { isSaving = false }
 
         do {
-            let name = registerName.trimmingCharacters(in: .whitespaces)
+            let name = registerUsername.trimmingCharacters(in: .whitespaces)
             let email = registerEmail.trimmingCharacters(in: .whitespaces).lowercased()
 
             do {
@@ -1474,6 +1818,7 @@ struct OnboardingView: View {
                 role: role,
                 auth: auth,
                 trainerAnswers: answers,
+                profileDraft: profileDraft,
                 onComplete: { name in onFinish(name, "") }
             )
         } catch {
@@ -1508,6 +1853,7 @@ struct OnboardingView: View {
                 role: role,
                 auth: auth,
                 trainerAnswers: answers,
+                profileDraft: profileDraft,
                 onComplete: { name in onFinish(name, "") }
             )
         } catch {
@@ -1674,7 +2020,7 @@ struct OnboardingView: View {
         defer { isSaving = false }
 
         do {
-            let fallbackName = registerName.trimmingCharacters(in: .whitespaces)
+            let fallbackName = registerUsername.trimmingCharacters(in: .whitespaces)
             let displayName = AppleDisplayNameSync.resolvedForRequest(
                 from: apple,
                 fallbackRegisterName: fallbackName
@@ -1703,6 +2049,7 @@ struct OnboardingView: View {
                     role: role,
                     auth: auth,
                     trainerAnswers: answers,
+                    profileDraft: profileDraft,
                     onComplete: { name in onFinish(name, "") }
                 )
             }
@@ -1742,6 +2089,17 @@ struct OnboardingView: View {
             return description
         }
         return error.localizedDescription
+    }
+
+    /// Profile draft collected during the profile-setup step, applied when onboarding completes.
+    private var profileDraft: OnboardingAuthService.ProfileDraft {
+        OnboardingAuthService.ProfileDraft(
+            displayName: profileDisplayName,
+            jobTitle: profileJobTitle,
+            bio: profileBio,
+            specialties: profileSpecialties.map(\.rawValue).sorted(),
+            primaryCoachingFocus: selectedFocusOptions.sorted()
+        )
     }
 
     private func inviteEmailMismatchMessage(invitedEmail: String) -> String {
@@ -1877,18 +2235,22 @@ private struct OptionCard: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(option.title)
                         .font(.system(size: 20, weight: .black))
                         .fontWidth(.condensed)
                         .textCase(.uppercase)
                         .foregroundStyle(isSelected ? Theme.Color.accentInk : Theme.Color.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     if let subtitle = option.subtitle {
                         Text(subtitle)
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(isSelected ? Theme.Color.accentInk.opacity(0.8) : .white.opacity(0.8))
                             .multilineTextAlignment(.leading)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                 }
                 Spacer(minLength: 0)
@@ -1897,10 +2259,11 @@ private struct OptionCard: View {
                         .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(Theme.Color.accentInk)
                         .transition(.scale.combined(with: .opacity))
+                        .layoutPriority(1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 18)
             .padding(.vertical, option.subtitle == nil ? 22 : 20)
             .background(
                 (isSelected ? Theme.Color.accent : Color.white.opacity(0.06)),

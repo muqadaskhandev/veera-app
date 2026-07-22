@@ -23,12 +23,11 @@ struct InvitePayload: Identifiable {
 }
 
 extension InvitePayload {
-    /// Builds a deterministic per-client invite link from their id.
-    init(client: Client) {
-        let code = client.id.uuidString.prefix(8).lowercased()
+    /// Builds an invite link from a real, backend-issued join code.
+    init(clientName: String, code: String) {
         self.init(
-            clientName: client.name,
-            url: URL(string: "https://verraos.app/invite/\(code)")!
+            clientName: clientName,
+            url: URL(string: "https://verraos.app/join?code=\(code)")!
         )
     }
 }

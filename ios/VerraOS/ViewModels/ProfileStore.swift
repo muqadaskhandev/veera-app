@@ -98,15 +98,13 @@ final class ProfileStore {
         weightStore[client.id] ?? []
     }
 
-    /// Logs today's weight, replacing any existing entry already logged today.
+    /// Logs a new weight entry. Always appends — even if a value was already
+    /// logged today — so intra-day re-logs (e.g. morning vs. evening) each
+    /// keep their own place in the history instead of overwriting one another.
     func logWeight(_ kg: Double, for client: Client) {
         var entries = weights(for: client)
         let rounded = (kg * 10).rounded() / 10
-        if let idx = entries.firstIndex(where: { $0.daysAgo == 0 }) {
-            entries[idx].kg = rounded
-        } else {
-            entries.append(WeightEntry(daysAgo: 0, kg: rounded))
-        }
+        entries.append(WeightEntry(daysAgo: 0, kg: rounded))
         weightStore[client.id] = entries
         scheduleWeightPersist(kg: rounded, for: client)
     }

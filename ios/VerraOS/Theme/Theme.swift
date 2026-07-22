@@ -79,4 +79,10 @@ extension View {
     func tabScrollContent() -> some View {
         contentMargins(.bottom, Theme.Layout.scrollBottomPadding, for: .scrollContent)
     }
+
+    /// Lets the keyboard follow a drag on a `ScrollView` full of text fields,
+    /// dismissing interactively instead of requiring a tap elsewhere first.
+    func dismissKeyboardOnScroll() -> some View {
+        scrollDismissesKeyboard(.interactively)
+    }
 }

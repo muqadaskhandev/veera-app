@@ -5,6 +5,7 @@ struct AuthController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let auth = routes.grouped("api", "auth")
         auth.post("register", use: register)
+        auth.get("username-availability", use: usernameAvailability)
         auth.post("verify-email", use: verifyEmail)
         auth.post("verify-email", "resend", use: resendVerificationEmail)
         auth.post("login", use: login)
@@ -17,6 +18,14 @@ struct AuthController: RouteCollection {
 
         let protected = auth.grouped(JWTAuthMiddleware())
         protected.get("me", use: me)
+    }
+
+    @Sendable
+    func usernameAvailability(req: Request) async throws -> UsernameAvailabilityResponse {
+        guard let username = req.query[String.self, at: "username"] else {
+            throw Abort(.badRequest, reason: "Missing username query parameter")
+        }
+        return try await AuthService.checkUsernameAvailability(username, on: req.db)
     }
 
     @Sendable

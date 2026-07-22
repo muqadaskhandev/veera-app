@@ -23,6 +23,18 @@ enum ChatMediaService {
         )
     }
 
+    /// Ships GIF bytes as-is (no re-encoding) so animation survives the round
+    /// trip — `preparePhoto` would flatten it to a single static JPEG frame.
+    static func prepareGIF(from data: Data) -> PreparedUpload? {
+        guard !data.isEmpty else { return nil }
+        return PreparedUpload(
+            data: data,
+            filename: "gif-\(UUID().uuidString).gif",
+            mimeType: "image/gif",
+            kind: .photo
+        )
+    }
+
     static func prepareVideo(from url: URL) -> PreparedUpload? {
         guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
         let ext = url.pathExtension.lowercased()

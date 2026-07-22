@@ -5,13 +5,21 @@ struct ClientRedeemInviteSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let account: ClientAccountStore
+    var prefillCode: String? = nil
     var onLinked: () -> Void = {}
 
-    @State private var inviteCode = ""
+    @State private var inviteCode: String
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var validatedTrainerName: String?
     @State private var invitedEmail: String?
+
+    init(account: ClientAccountStore, prefillCode: String? = nil, onLinked: @escaping () -> Void = {}) {
+        self.account = account
+        self.prefillCode = prefillCode
+        self.onLinked = onLinked
+        _inviteCode = State(initialValue: prefillCode ?? "")
+    }
 
     var body: some View {
         NavigationStack {
@@ -28,6 +36,17 @@ struct ClientRedeemInviteSheet: View {
                     }
 
                     InviteCodeField(code: $inviteCode, style: .settings)
+
+                    if prefillCode != nil {
+                        HStack(spacing: 6) {
+                            Image(systemName: "link")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(Theme.Color.accentInk)
+                            Text("Filled in from your invite link")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(Theme.Color.inkMuted)
+                        }
+                    }
 
                     if let validatedTrainerName {
                         HStack(spacing: 8) {

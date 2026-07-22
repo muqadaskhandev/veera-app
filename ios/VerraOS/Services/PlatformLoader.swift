@@ -162,9 +162,11 @@ enum PlatformLoader {
                         sets: exercise.sets,
                         reps: exercise.reps,
                         category: exercise.category,
-                        kind: WorkoutItemKind(rawValue: exercise.kind) ?? .exercise
+                        kind: WorkoutItemKind(rawValue: exercise.kind) ?? .exercise,
+                        weightKg: exercise.weightKg
                     )
-                }
+                },
+                notes: day.notes
             )
         }
     }
@@ -184,9 +186,11 @@ enum PlatformLoader {
                             category: exercise.category,
                             sets: exercise.sets,
                             reps: exercise.reps,
-                            kind: exercise.kind.rawValue
+                            kind: exercise.kind.rawValue,
+                            weightKg: exercise.weightKg
                         )
-                    }
+                    },
+                    notes: day.notes
                 )
             },
             weekCount: weekCount

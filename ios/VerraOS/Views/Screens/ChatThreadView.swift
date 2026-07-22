@@ -463,12 +463,20 @@ struct ChatThreadView: View {
             return
         }
 
-        guard let data = try? await item.loadTransferable(type: Data.self),
-              let upload = ChatMediaService.preparePhoto(from: data) else {
+        guard let data = try? await item.loadTransferable(type: Data.self) else {
             toast = ToastData(message: "Couldn't load that photo", icon: "exclamationmark.triangle.fill")
             return
         }
-        await sendPreparedUpload(upload, successMessage: "Photo sent", icon: "photo.fill")
+
+        // Send GIFs untouched so they stay animated — routing them through
+        // preparePhoto would flatten them to a static JPEG.
+        let isGIF = item.supportedContentTypes.contains(where: { $0.conforms(to: .gif) })
+        let upload = isGIF ? ChatMediaService.prepareGIF(from: data) : ChatMediaService.preparePhoto(from: data)
+        guard let upload else {
+            toast = ToastData(message: "Couldn't load that photo", icon: "exclamationmark.triangle.fill")
+            return
+        }
+        await sendPreparedUpload(upload, successMessage: isGIF ? "GIF sent" : "Photo sent", icon: "photo.fill")
     }
 
     @MainActor
@@ -547,15 +555,17 @@ private struct MessageBubble: View {
     @ViewBuilder private var bubble: some View {
         switch message.kind {
         case .text(let body):
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 4) {
                 Text(body)
                     .font(.system(size: 15.5, weight: .medium))
                     .foregroundStyle(message.isOutgoing ? Theme.Color.accentInk : Theme.Color.ink)
-                    .frame(maxWidth: .infinity, alignment: message.isOutgoing ? .trailing : .leading)
+                    .multilineTextAlignment(message.isOutgoing ? .trailing : .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 if message.isOutgoing {
                     MessageDeliveryIndicator(status: message.deliveryStatus, onAccentBackground: true)
                 }
             }
+            .frame(maxWidth: bubbleMaxWidth, alignment: message.isOutgoing ? .trailing : .leading)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(bubbleBackground, in: RoundedRectangle(cornerRadius: 20))
@@ -587,6 +597,12 @@ private struct MessageBubble: View {
 
     private var bubbleBackground: Color {
         message.isOutgoing ? Theme.Color.accent : Theme.Color.surface
+    }
+
+    /// Caps text bubble width so short messages hug their content instead of
+    /// stretching edge-to-edge, while long messages still wrap sensibly.
+    private var bubbleMaxWidth: CGFloat {
+        min(260, UIScreen.main.bounds.width * 0.75)
     }
 
     @ViewBuilder private var outgoingDeliveryBadge: some View {

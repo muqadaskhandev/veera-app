@@ -26,7 +26,12 @@ struct ContentView: View {
     @State private var showingHelp = false
     @State private var showLogOutConfirm = false
     @State private var incomingChatAlert: IncomingChatAlert?
+    /// True once the trainer dismisses the paywall's X for this app session —
+    /// re-verified against the server on every appear / foreground so an
+    /// expired subscription can't be "escaped" by leaving it dismissed.
+    @State private var paywallDismissed = false
     @Environment(SubscriptionStore.self) private var subscription
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Public legal page opened from the drawer's Legal row.
     private let legalURL = URL(string: "https://verraos.app/legal")!
@@ -81,12 +86,13 @@ struct ContentView: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.86), value: incomingChatAlert?.title)
         .preferredColorScheme(.light)
         .overlay {
-            if subscription.needsPaywall {
-                BillingView(isPaywall: true, onBack: onLogOut)
+            if subscription.needsPaywall && !paywallDismissed {
+                BillingView(isPaywall: true, onDismiss: { paywallDismissed = true })
                     .environment(subscription)
                     .transition(.opacity)
             }
         }
+        .animation(.easeInOut(duration: 0.25), value: subscription.needsPaywall && !paywallDismissed)
         .background(Theme.Color.ink.ignoresSafeArea())
         .environment(app)
         .environment(schedule)
@@ -122,6 +128,16 @@ struct ContentView: View {
             if isOpen {
                 Task { await subscription.refreshFromServer() }
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await subscription.refreshFromServer() }
+            }
+        }
+        .onChange(of: subscription.hasActiveSubscription) { _, isActive in
+            // Once a subscription is confirmed active there's nothing to
+            // dismiss — clear the flag so a future lapse shows the paywall again.
+            if isActive { paywallDismissed = false }
         }
         .sheet(isPresented: $showingNotifications) {
             NotificationCenterView()

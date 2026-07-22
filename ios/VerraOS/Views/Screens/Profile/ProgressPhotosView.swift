@@ -28,7 +28,9 @@ struct ProgressPhotosView: View {
             ProfileTopBar(
                 title: "Progress Photos",
                 subtitle: client.name.firstWord,
-                trailing: isReadOnly ? nil : AnyView(addButton),
+                // Clients can log their own progress photos too, same as weight —
+                // this is not gated behind isReadOnly like trainer-only editing controls.
+                trailing: AnyView(addButton),
                 onBack: onBack
             )
             ScrollView(showsIndicators: false) {
@@ -110,7 +112,7 @@ struct ProgressPhotosView: View {
     private var galleryCard: some View {
         SectionCard(title: "Gallery · \(photos.count) photos") {
             if photos.isEmpty {
-                Text(isReadOnly ? "No photos yet." : "No photos yet — tap + to upload the first one.")
+                Text("No photos yet — tap + to upload the first one.")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.Color.inkMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -307,6 +307,8 @@ struct WorkoutDayPayload: Content {
     var label: String
     var focus: String?
     var exercises: [WorkoutExercisePayload]
+    /// Free-form session-log notes captured after a workout (Detailed or Freestyle).
+    var notes: String? = nil
 }
 
 struct WorkoutExercisePayload: Content {
@@ -317,6 +319,8 @@ struct WorkoutExercisePayload: Content {
     var sets: Int?
     var reps: Int?
     var kind: String
+    /// Logged working weight for this exercise, in kilograms.
+    var weightKg: Double? = nil
 }
 
 struct WorkoutWeekResponse: Content {

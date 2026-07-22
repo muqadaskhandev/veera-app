@@ -16,6 +16,14 @@
 				<string>app.rork.hiyjy25oz4yjrbssyotkw</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>verra.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>verraos</string>
+			</array>
+		</dict>
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>

@@ -99,18 +99,11 @@ enum ClientProfileService {
     ) async throws -> WeightLogDTO {
         _ = try await ClientAccessService.requireClient(clientID, for: user, on: database)
         let recordedAt = payload.recordedAt ?? Date()
-        let startOfDay = Calendar.current.startOfDay(for: recordedAt)
 
-        if let existing = try await WeightLog.query(on: database)
-            .filter(\.$client.$id == clientID)
-            .filter(\.$recordedAt >= startOfDay)
-            .first() {
-            existing.kg = payload.kg
-            existing.recordedAt = recordedAt
-            try await existing.save(on: database)
-            return try WeightLogDTO(from: existing)
-        }
-
+        // Always record a new entry with its own timestamp, even if one was
+        // already logged today — trainers/clients may legitimately log
+        // multiple times in a day (e.g. morning and evening) and each should
+        // show up in the history.
         let log = WeightLog(clientID: clientID, loggedByUserID: user.id, kg: payload.kg, recordedAt: recordedAt)
         try await log.save(on: database)
 

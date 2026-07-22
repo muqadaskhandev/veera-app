@@ -60,6 +60,7 @@ struct WeightTrackingView: View {
             }
             .frame(maxHeight: .infinity)
             .tabScrollContent()
+            .dismissKeyboardOnScroll()
         }
         .background(Theme.Color.background)
         .toast($toast)

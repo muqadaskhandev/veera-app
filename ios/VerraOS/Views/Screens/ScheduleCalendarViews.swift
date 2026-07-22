@@ -36,6 +36,9 @@ struct DayTimelineView: View {
         }
     }
 
+    /// Horizontal drag threshold (points) before a swipe jumps the week.
+    private let weekSwipeThreshold: CGFloat = 40
+
     private var dateStrip: some View {
         HStack(spacing: 8) {
             ForEach(week, id: \.self) { date in
@@ -73,6 +76,18 @@ struct DayTimelineView: View {
                 .buttonStyle(.plain)
             }
         }
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    guard abs(value.translation.width) > weekSwipeThreshold,
+                          abs(value.translation.width) > abs(value.translation.height) else { return }
+                    let direction = value.translation.width < 0 ? 1 : -1
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+                        selectedDate = calendar.date(byAdding: .day, value: direction * 7, to: selectedDate) ?? selectedDate
+                    }
+                }
+        )
     }
 
     private var emptyState: some View {

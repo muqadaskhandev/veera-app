@@ -60,6 +60,9 @@ struct VerraOSApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .onOpenURL { url in
+                    DeepLinkRouter.shared.handle(url: url)
+                }
         }
         .backgroundTask(.appRefresh(HealthBackgroundSync.taskIdentifier)) {
             _ = await HealthBackgroundSync.performBackgroundSync()

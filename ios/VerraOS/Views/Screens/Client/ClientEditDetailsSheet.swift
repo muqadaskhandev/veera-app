@@ -22,6 +22,12 @@ struct ClientEditDetailsSheet: View {
     @State private var draftAvatarData: Data?
     @State private var pendingAvatarData: Data?
     @State private var toast: ToastData?
+    @State private var didPopulateWeights = false
+
+    private enum Field: Hashable {
+        case name, age, heightFeet, heightInches, startWeight, goalWeight
+    }
+    @FocusState private var focusedField: Field?
 
     private var unit: WeightUnit { trainer.units }
 
@@ -40,10 +46,11 @@ struct ClientEditDetailsSheet: View {
             _heightFeet = State(initialValue: "")
             _heightInches = State(initialValue: "")
         }
-        let startKg = client?.weightKg.map(Double.init) ?? 0
-        let goalKg = client?.goalWeightKg.map(Double.init) ?? 0
-        _startWeight = State(initialValue: startKg > 0 ? String(format: "%.0f", WeightUnit.kg.fromKg(startKg)) : "")
-        _goalWeight = State(initialValue: goalKg > 0 ? String(format: "%.0f", WeightUnit.kg.fromKg(goalKg)) : "")
+        // Weight fields depend on the trainer's preferred unit, which isn't
+        // available from the environment yet inside `init` — populated in
+        // `onAppear` via `populateWeights()` instead.
+        _startWeight = State(initialValue: "")
+        _goalWeight = State(initialValue: "")
     }
 
     var body: some View {
@@ -80,13 +87,34 @@ struct ClientEditDetailsSheet: View {
                     .background(Theme.Color.accent, in: Capsule())
                     .disabled(account.isSaving)
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focusedField = nil }.fontWeight(.semibold)
+                }
             }
             .toast($toast)
             .onChange(of: pickerItem) { _, newValue in
                 guard let newValue else { return }
                 Task { await loadImage(newValue) }
             }
+            .onAppear {
+                guard !didPopulateWeights else { return }
+                didPopulateWeights = true
+                populateWeights()
+            }
         }
+    }
+
+    private func populateWeights() {
+        let client = account.client
+        let startKg = client?.weightKg.map(Double.init) ?? 0
+        let goalKg = client?.goalWeightKg.map(Double.init) ?? 0
+        startWeight = startKg > 0 ? formatWeight(unit.fromKg(startKg)) : ""
+        goalWeight = goalKg > 0 ? formatWeight(unit.fromKg(goalKg)) : ""
+    }
+
+    private func formatWeight(_ value: Double) -> String {
+        value == value.rounded() ? String(format: "%.0f", value) : String(format: "%.1f", value)
     }
 
     private var detailsSection: some View {
@@ -94,8 +122,8 @@ struct ClientEditDetailsSheet: View {
             sectionLabel("Your Details")
             field(label: "Age", text: $age, placeholder: "—", keyboard: .numberPad)
             heightField
-            weightField(label: "Start weight", text: $startWeight)
-            weightField(label: "Goal weight", text: $goalWeight)
+            weightField(label: "Start weight", text: $startWeight, field: .startWeight)
+            weightField(label: "Goal weight", text: $goalWeight, field: .goalWeight)
         }
     }
 
@@ -103,13 +131,13 @@ struct ClientEditDetailsSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("Height")
             HStack(spacing: Theme.Spacing.sm) {
-                unitBox(text: $heightFeet, unit: "ft")
-                unitBox(text: $heightInches, unit: "in")
+                unitBox(text: $heightFeet, unit: "ft", field: .heightFeet)
+                unitBox(text: $heightInches, unit: "in", field: .heightInches)
             }
         }
     }
 
-    private func weightField(label: String, text: Binding<String>) -> some View {
+    private func weightField(label: String, text: Binding<String>, field: Field) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel(label)
             HStack {
@@ -118,6 +146,7 @@ struct ClientEditDetailsSheet: View {
                     .foregroundStyle(Theme.Color.ink)
                     .tint(Theme.Color.ink)
                     .keyboardType(.decimalPad)
+                    .focused($focusedField, equals: field)
                 Text(unit.short)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.Color.inkFaint)
@@ -126,16 +155,19 @@ struct ClientEditDetailsSheet: View {
             .padding(.vertical, 13)
             .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+            .contentShape(Rectangle())
+            .onTapGesture { focusedField = field }
         }
     }
 
-    private func unitBox(text: Binding<String>, unit: String) -> some View {
+    private func unitBox(text: Binding<String>, unit: String, field: Field) -> some View {
         HStack {
             TextField("", text: text, prompt: Text("—").foregroundStyle(Theme.Color.inkFaint))
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Theme.Color.ink)
                 .tint(Theme.Color.ink)
                 .keyboardType(.numberPad)
+                .focused($focusedField, equals: field)
             Text(unit)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.Color.inkFaint)
@@ -145,6 +177,8 @@ struct ClientEditDetailsSheet: View {
         .frame(maxWidth: .infinity)
         .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { focusedField = field }
     }
 
     private var photoSection: some View {
@@ -271,16 +305,20 @@ struct ClientEditDetailsSheet: View {
         placeholder: String,
         keyboard: UIKeyboardType = .default
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let field: Field = keyboard == .numberPad ? .age : .name
+        return VStack(alignment: .leading, spacing: 8) {
             sectionLabel(label)
             TextField(placeholder, text: text)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Theme.Color.ink)
                 .keyboardType(keyboard)
+                .focused($focusedField, equals: field)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
                 .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
                 .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+                .contentShape(Rectangle())
+                .onTapGesture { self.focusedField = field }
         }
     }
 

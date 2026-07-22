@@ -31,6 +31,11 @@ final class ScheduleStore {
     var calendarSyncError: String?
     var isRefreshingCalendar = false
 
+    /// IDs of sessions with an in-flight create/update request. `refreshFromServer`
+    /// preserves these locally even if the server hasn't reflected them yet, so a
+    /// refresh that lands mid-save can't make a freshly-added appointment vanish.
+    private var pendingPersistIDs: Set<UUID> = []
+
     private static let prefsKey = "verra.schedule.calendarPrefs"
     var onCalendarPrefsPersisted: ((String) -> Void)?
 
@@ -446,7 +451,17 @@ final class ScheduleStore {
         guard let token = AuthStore.accessToken else { return }
         do {
             let dtos = try await VerraAPI.fetchSessions(accessToken: token)
-            sessions = dtos.map(SessionLoader.session(from:))
+            var fetched = dtos.map(SessionLoader.session(from:))
+
+            // A session whose create/update request is still in flight won't be
+            // in this response yet — keep it locally rather than dropping it.
+            if !pendingPersistIDs.isEmpty {
+                let fetchedIDs = Set(fetched.map(\.id))
+                let stillPending = sessions.filter { pendingPersistIDs.contains($0.id) && !fetchedIDs.contains($0.id) }
+                fetched.append(contentsOf: stillPending)
+            }
+
+            sessions = fetched
             await exportSessionsToExternalCalendars()
             await SessionReminderService.rescheduleAll(
                 for: sessions,
@@ -463,7 +478,9 @@ final class ScheduleStore {
 
     private func persistSession(_ session: Session) {
         guard let token = AuthStore.accessToken else { return }
-        Task {
+        pendingPersistIDs.insert(session.id)
+        Task { @MainActor in
+            defer { pendingPersistIDs.remove(session.id) }
             do {
                 let clientID = clientID(for: session)
                 _ = try await VerraAPI.updateSession(

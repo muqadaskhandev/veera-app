@@ -25,6 +25,19 @@ func configure(_ app: Application) async throws {
     let useTLS = Environment.get("DATABASE_SSL").map { ["1", "true", "yes"].contains($0.lowercased()) }
         ?? !(hostname == "localhost" || hostname == "127.0.0.1")
 
+    let postgresTLS: PostgresConnection.Configuration.TLS
+    if useTLS {
+        var tlsConfig = TLSConfiguration.makeClientConfiguration()
+        let skipVerify = Environment.get("DATABASE_SSL_VERIFY").map { ["0", "false", "no"].contains($0.lowercased()) }
+            ?? hostname.contains("pooler.supabase.com")
+        if skipVerify {
+            tlsConfig.certificateVerification = .none
+        }
+        postgresTLS = try .require(.init(configuration: tlsConfig))
+    } else {
+        postgresTLS = .disable
+    }
+
     app.databases.use(
         DatabaseConfigurationFactory.postgres(configuration: .init(
             hostname: hostname,
@@ -32,7 +45,7 @@ func configure(_ app: Application) async throws {
             username: username,
             password: password,
             database: database,
-            tls: useTLS ? .require(try .init(configuration: .makeClientConfiguration())) : .disable
+            tls: postgresTLS
         )),
         as: .psql
     )

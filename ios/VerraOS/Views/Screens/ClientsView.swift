@@ -10,7 +10,6 @@ import SwiftUI
 struct ClientsView: View {
     @Environment(ClientStore.self) private var store
     @Environment(AppState.self) private var app
-    @Environment(MessageStore.self) private var messages
 
     @State private var search: String = ""
     @State private var sort: ClientSort = .status
@@ -99,10 +98,10 @@ struct ClientsView: View {
                                 client: client,
                                 onProfile: { path.append(client) },
                                 onChat: {
-                                    Task {
-                                        _ = await messages.threadID(for: client)
-                                        app.openChat(with: client.id)
-                                    }
+                                    // Switch tabs immediately; MessagesView resolves/creates the
+                                    // thread for `pendingChatClientID` in the background and pushes
+                                    // navigation once it's ready, so there's no network wait here.
+                                    app.openChat(with: client.id)
                                 },
                                 onArchive: {
                                     withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
@@ -114,7 +113,7 @@ struct ClientsView: View {
                                     )
                                 },
                                 onDelete: { deleteCandidate = client },
-                                onInvite: { invitePayload = InvitePayload(client: client) },
+                                onInvite: { Task { await shareInvite(for: client) } },
                                 isArchivedContext: showArchived
                             )
                         }
@@ -244,6 +243,19 @@ struct ClientsView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 60)
+    }
+
+    /// Fetches (or lazily mints) a real invite code for this client from the
+    /// backend before presenting the share sheet, so the link actually works.
+    @MainActor
+    private func shareInvite(for client: Client) async {
+        guard let token = AuthStore.accessToken else { return }
+        do {
+            let link = try await VerraAPI.fetchInviteLink(clientID: client.id, accessToken: token)
+            invitePayload = InvitePayload(clientName: client.name, code: link.code)
+        } catch {
+            toast = ToastData(message: "Couldn't create invite link", icon: "exclamationmark.triangle.fill")
+        }
     }
 
     // MARK: Floating add button

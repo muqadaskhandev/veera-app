@@ -87,6 +87,25 @@ enum Specialty: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// Primary coaching focuses offered during trainer onboarding (multi-select).
+enum CoachingFocus: String, Codable, CaseIterable, Identifiable {
+    case strengthMuscle = "Strength & Muscle Building"
+    case weightLossToning = "Weight Loss & Toning"
+    case athleticPerformance = "Athletic Performance"
+    case generalHealth = "General Health & Longevity"
+
+    var id: String { rawValue }
+
+    var subtitle: String {
+        switch self {
+        case .strengthMuscle: return "Hypertrophy and getting stronger"
+        case .weightLossToning: return "Fat loss and body composition"
+        case .athleticPerformance: return "Speed, power, and sport-specific"
+        case .generalHealth: return "Wellness, mobility, and healthy aging"
+        }
+    }
+}
+
 /// Persisted trainer account: identity, specialties, and every preference shown
 /// in the menu's Settings hub. Encoded as JSON to UserDefaults so it survives
 /// app launches.

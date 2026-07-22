@@ -160,6 +160,13 @@ final class ClientStore {
         }
     }
 
+    /// Optimistically nudges a client's session bank by `delta` (clamped to
+    /// zero), ahead of the server round-trip confirming the change.
+    func adjustSessionsRemaining(by delta: Int, for id: UUID) {
+        guard let index = clients.firstIndex(where: { $0.id == id }) else { return }
+        clients[index].sessionsRemaining = max(0, clients[index].sessionsRemaining + delta)
+    }
+
     func deductSession(forName name: String) {
         guard let index = clients.firstIndex(where: { $0.name == name }) else { return }
         clients[index].sessionsRemaining = max(0, clients[index].sessionsRemaining - 1)

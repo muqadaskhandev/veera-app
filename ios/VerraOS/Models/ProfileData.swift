@@ -144,6 +144,8 @@ struct WorkoutExercise: Identifiable, Hashable {
     var category: String?
     /// Whether this row is an exercise, a section header, or a rest day.
     var kind: WorkoutItemKind
+    /// Logged working weight for this exercise, in kilograms.
+    var weightKg: Double?
 
     init(
         id: UUID = UUID(),
@@ -152,7 +154,8 @@ struct WorkoutExercise: Identifiable, Hashable {
         sets: Int? = nil,
         reps: Int? = nil,
         category: String? = nil,
-        kind: WorkoutItemKind = .exercise
+        kind: WorkoutItemKind = .exercise,
+        weightKg: Double? = nil
     ) {
         self.id = id
         self.exerciseID = exerciseID
@@ -161,6 +164,7 @@ struct WorkoutExercise: Identifiable, Hashable {
         self.reps = reps
         self.category = category
         self.kind = kind
+        self.weightKg = weightKg
     }
 
     var isLinkedToLibrary: Bool { exerciseID != nil }
@@ -185,15 +189,18 @@ struct WorkoutDay: Identifiable, Hashable {
     let label: String
     var focus: String?
     var exercises: [WorkoutExercise]
+    /// Free-form session-log notes captured after a workout (Detailed or Freestyle mode).
+    var notes: String?
 
     /// A day is a rest day only when it has no actual exercises.
     var isRest: Bool { !exercises.contains { $0.kind == .exercise } }
 
-    init(id: UUID = UUID(), label: String, focus: String?, exercises: [WorkoutExercise]) {
+    init(id: UUID = UUID(), label: String, focus: String?, exercises: [WorkoutExercise], notes: String? = nil) {
         self.id = id
         self.label = label
         self.focus = focus
         self.exercises = exercises
+        self.notes = notes
     }
 }
 

@@ -30,6 +30,31 @@ enum InviteService {
         return invite
     }
 
+    /// Returns a shareable invite code for an existing client — reusing an
+    /// unredeemed code already linked to them, or minting a fresh one. Used by
+    /// the trainer's "Share Invite Link" action so the URL always matches a
+    /// code the backend actually recognizes.
+    static func linkForClient(
+        clientID: UUID,
+        trainer: Trainer,
+        createdBy user: User,
+        on database: any Database
+    ) async throws -> InviteCode {
+        if let existing = try await InviteCode.query(on: database)
+            .filter(\.$client.$id == clientID)
+            .filter(\.$redeemedAt == nil)
+            .sort(\.$createdAt, .descending)
+            .first(),
+           existing.isRedeemable {
+            return existing
+        }
+
+        let invite = try await createInvite(for: trainer, createdBy: user, expiresInDays: nil, on: database)
+        invite.$client.id = clientID
+        try await invite.save(on: database)
+        return invite
+    }
+
     /// Creates a pending roster entry when a trainer invites someone who has not signed up yet.
     static func createPendingClient(
         for trainer: Trainer,
@@ -51,11 +76,12 @@ enum InviteService {
         let phone = payload.clientPhone?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
+        let sessionsRemaining = payload.sessionsRemaining ?? 0
         let client = Client(
             trainerID: try trainer.requireID(),
             name: name,
             initials: initials(from: name),
-            sessionsRemaining: payload.sessionsRemaining ?? 0,
+            sessionsRemaining: sessionsRemaining,
             status: "pending",
             email: email,
             phone: phone,
@@ -69,6 +95,16 @@ enum InviteService {
             skillLevel: payload.skillLevel ?? ""
         )
         try await client.save(on: database)
+
+        // Backfill a ledger entry for the starting balance so it shows up under
+        // the client's "Packages" filter instead of being an invisible credit.
+        try await FinancialService.recordInitialPackage(
+            client: client,
+            trainerID: try trainer.requireID(),
+            sessionsRemaining: sessionsRemaining,
+            on: database
+        )
+
         return client
     }
 

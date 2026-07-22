@@ -3,7 +3,7 @@ import Vapor
 
 enum MessageMediaService {
     private static let maxBytes = 25 * 1024 * 1024
-    private static let allowedExtensions: Set<String> = ["jpg", "jpeg", "png", "webp", "mp4", "mov", "m4a", "mp3", "wav"]
+    private static let allowedExtensions: Set<String> = ["jpg", "jpeg", "png", "webp", "gif", "mp4", "mov", "m4a", "mp3", "wav"]
 
     static func directory(on app: Application) -> String {
         app.directory.workingDirectory + "uploads/chat/"
