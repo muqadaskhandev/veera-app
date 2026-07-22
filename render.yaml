@@ -1,0 +1,81 @@
+# Render Blueprint — Verra API (Vapor + Supabase)
+# Dashboard: New → Blueprint → connect repo, or New → Web Service manually with these settings.
+services:
+  - type: web
+    name: verra-api
+    runtime: docker
+    rootDir: backend
+    plan: starter
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      # Supabase (Sydney pooler — same region family as Singapore Render)
+      - key: DATABASE_HOST
+        value: aws-0-ap-southeast-2.pooler.supabase.com
+      - key: DATABASE_PORT
+        value: "5432"
+      - key: DATABASE_USERNAME
+        value: postgres.sokeyzdjxszlahgwyxqg
+      - key: DATABASE_NAME
+        value: postgres
+      - key: DATABASE_SSL
+        value: "true"
+      - key: DATABASE_PASSWORD
+        sync: false
+      # Auth
+      - key: JWT_SECRET
+        sync: false
+      - key: APPLE_CLIENT_ID
+        value: app.rork.hiyjy25oz4yjrbssyotkw
+      - key: ADMIN_SETUP_SECRET
+        sync: false
+      # Email (SES)
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: us-east-1
+      - key: SES_FROM_EMAIL
+        sync: false
+      - key: SES_FROM_NAME
+        value: Verra
+      - key: APP_URL
+        value: https://verraos.app
+      - key: PASSWORD_RESET_URL
+        value: https://verraos.app/reset-password
+      # Google OAuth — update redirect URI after first deploy
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CALENDAR_REDIRECT_URI
+        sync: false
+      # APNs — use APNS_PRIVATE_KEY (PEM text), not APNS_PRIVATE_KEY_PATH
+      - key: APNS_KEY_ID
+        sync: false
+      - key: APNS_TEAM_ID
+        sync: false
+      - key: APNS_BUNDLE_ID
+        value: app.rork.hiyjy25oz4yjrbssyotkw
+      - key: APNS_PRIVATE_KEY
+        sync: false
+      - key: APNS_USE_SANDBOX
+        value: "true"
+      # Stripe
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: APPLE_PAY_MERCHANT_ID
+        value: merchant.com.verraapp.ios
+      - key: STRIPE_MERCHANT_COUNTRY
+        value: US
+      - key: STRIPE_CURRENCY
+        value: usd
+      - key: STRIPE_TRAINER_MONTHLY_AMOUNT
+        value: "600"
+      - key: STRIPE_TRAINER_ANNUAL_AMOUNT
+        value: "5760"

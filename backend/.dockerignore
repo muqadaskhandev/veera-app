@@ -1,2 +1,6 @@
 .build/
 .swiftpm/
+.env
+.env.*
+uploads/
+verra_supabase_migration.sql
