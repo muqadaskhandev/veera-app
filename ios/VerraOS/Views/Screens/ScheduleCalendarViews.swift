@@ -37,57 +37,79 @@ struct DayTimelineView: View {
     }
 
     /// Horizontal drag threshold (points) before a swipe jumps the week.
-    private let weekSwipeThreshold: CGFloat = 40
+    private let weekSwipeThreshold: CGFloat = 48
+    @State private var weekDragOffset: CGFloat = 0
 
     private var dateStrip: some View {
         HStack(spacing: 8) {
             ForEach(week, id: \.self) { date in
-                let isActive = calendar.isDate(date, inSameDayAs: selectedDate)
-                let hasSessions = weekSessions.contains {
-                    calendar.isDate($0.scheduledAt, inSameDayAs: date) && !$0.isSkipped
-                }
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                        selectedDate = date
-                    }
-                } label: {
-                    VStack(spacing: 7) {
-                        Text(ScheduleCalendar.weekdayLabel(for: date, calendar: calendar))
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(isActive ? Theme.Color.accentInk.opacity(0.7) : Theme.Color.inkFaint)
-                        Text("\(ScheduleCalendar.dayOfMonth(for: date, calendar: calendar))")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(isActive ? Theme.Color.accentInk : Theme.Color.ink)
-                        Circle()
-                            .fill(hasSessions ? (isActive ? Theme.Color.accentInk : Theme.Color.accent) : Color.clear)
-                            .frame(width: 5, height: 5)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.md)
-                            .fill(isActive ? Theme.Color.accent : Theme.Color.surface)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.md)
-                            .stroke(isActive ? .clear : Theme.Color.hairline, lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
+                dayCell(for: date)
             }
         }
+        .offset(x: weekDragOffset * 0.35)
         .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 20)
-                .onEnded { value in
-                    guard abs(value.translation.width) > weekSwipeThreshold,
-                          abs(value.translation.width) > abs(value.translation.height) else { return }
-                    let direction = value.translation.width < 0 ? 1 : -1
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
-                        selectedDate = calendar.date(byAdding: .day, value: direction * 7, to: selectedDate) ?? selectedDate
+        // simultaneousGesture keeps day taps working while still capturing
+        // a clear horizontal swipe to page weeks.
+        .simultaneousGesture(weekSwipeGesture)
+        .accessibilityHint("Swipe left or right to change week")
+    }
+
+    private func dayCell(for date: Date) -> some View {
+        let isActive = calendar.isDate(date, inSameDayAs: selectedDate)
+        let hasSessions = weekSessions.contains {
+            calendar.isDate($0.scheduledAt, inSameDayAs: date) && !$0.isSkipped
+        }
+        return VStack(spacing: 7) {
+            Text(ScheduleCalendar.weekdayLabel(for: date, calendar: calendar))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isActive ? Theme.Color.accentInk.opacity(0.7) : Theme.Color.inkFaint)
+            Text("\(ScheduleCalendar.dayOfMonth(for: date, calendar: calendar))")
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(isActive ? Theme.Color.accentInk : Theme.Color.ink)
+            Circle()
+                .fill(hasSessions ? (isActive ? Theme.Color.accentInk : Theme.Color.accent) : Color.clear)
+                .frame(width: 5, height: 5)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.md)
+                .fill(isActive ? Theme.Color.accent : Theme.Color.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.md)
+                .stroke(isActive ? .clear : Theme.Color.hairline, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                selectedDate = date
+            }
+        }
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+        .accessibilityLabel(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+    }
+
+    private var weekSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 16, coordinateSpace: .local)
+            .onChanged { value in
+                let horizontal = abs(value.translation.width) > abs(value.translation.height)
+                weekDragOffset = horizontal ? value.translation.width : 0
+            }
+            .onEnded { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                defer {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                        weekDragOffset = 0
                     }
                 }
-        )
+                guard abs(dx) > weekSwipeThreshold, abs(dx) > abs(dy) * 1.2 else { return }
+                let direction = dx < 0 ? 1 : -1
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+                    selectedDate = calendar.date(byAdding: .day, value: direction * 7, to: selectedDate) ?? selectedDate
+                }
+            }
     }
 
     private var emptyState: some View {
@@ -195,15 +217,20 @@ private struct PressableRowStyle: ButtonStyle {
 // MARK: - Month grid
 
 /// A full month grid with colored dots under days that have sessions.
-/// Tapping a day opens it in Day view.
+/// Tapping a day opens it in Day view. Swipe horizontally to change months.
 struct MonthGridView: View {
     let sessions: [Session]
     let monthAnchor: Date
     let selectedDate: Date
     let onSelectDate: (Date) -> Void
+    /// Called when the user swipes to an adjacent month (does not open Day view).
+    var onChangeMonth: (Date) -> Void = { _ in }
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
     private let weekdaySymbols = ["M", "T", "W", "T", "F", "S", "S"]
+    private let monthSwipeThreshold: CGFloat = 48
+
+    @State private var monthDragOffset: CGFloat = 0
 
     private var calendar: Calendar { Calendar.current }
 
@@ -253,6 +280,7 @@ struct MonthGridView: View {
                 }
             }
         }
+        .offset(x: monthDragOffset * 0.35)
         .padding(Theme.Spacing.md)
         .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.lg))
         .overlay(
@@ -260,6 +288,32 @@ struct MonthGridView: View {
                 .stroke(Theme.Color.hairline, lineWidth: 1)
         )
         .cardShadow()
+        .contentShape(Rectangle())
+        .simultaneousGesture(monthSwipeGesture)
+        .accessibilityHint("Swipe left or right to change month")
+    }
+
+    private var monthSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 16, coordinateSpace: .local)
+            .onChanged { value in
+                let horizontal = abs(value.translation.width) > abs(value.translation.height)
+                monthDragOffset = horizontal ? value.translation.width : 0
+            }
+            .onEnded { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                defer {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                        monthDragOffset = 0
+                    }
+                }
+                guard abs(dx) > monthSwipeThreshold, abs(dx) > abs(dy) * 1.2 else { return }
+                let direction = dx < 0 ? 1 : -1
+                guard let next = calendar.date(byAdding: .month, value: direction, to: monthAnchor) else { return }
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+                    onChangeMonth(next)
+                }
+            }
     }
 
     private func dotTints(for date: Date) -> [Color] {

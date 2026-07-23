@@ -157,11 +157,22 @@ struct ClientScheduleView: View {
                 onSelectSession: { detailSession = $0 }
             )
         case .month:
-            MonthGridView(sessions: mySessions, monthAnchor: monthAnchor, selectedDate: selectedDate) { date in
-                selectedDate = date
-                monthAnchor = date
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { mode = .day }
-            }
+            MonthGridView(
+                sessions: mySessions,
+                monthAnchor: monthAnchor,
+                selectedDate: selectedDate,
+                onSelectDate: { date in
+                    selectedDate = date
+                    monthAnchor = date
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { mode = .day }
+                },
+                onChangeMonth: { next in
+                    let cal = Calendar.current
+                    let delta = cal.dateComponents([.month], from: monthAnchor, to: next).month ?? 0
+                    monthAnchor = next
+                    selectedDate = cal.date(byAdding: .month, value: delta, to: selectedDate) ?? next
+                }
+            )
         }
     }
 

@@ -271,14 +271,22 @@ struct ScheduleView: View {
             MonthGridView(
                 sessions: store.sessions + (store.appleLinked && store.importPersonalEvents ? store.busyBlocks.map { $0.asSession() } : []),
                 monthAnchor: store.visibleMonthAnchor,
-                selectedDate: selectedDate
-            ) { date in
-                selectedDate = date
-                store.visibleMonthAnchor = date
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                    mode = .day
+                selectedDate: selectedDate,
+                onSelectDate: { date in
+                    selectedDate = date
+                    store.visibleMonthAnchor = date
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                        mode = .day
+                    }
+                },
+                onChangeMonth: { next in
+                    let cal = Calendar.current
+                    let delta = cal.dateComponents([.month], from: store.visibleMonthAnchor, to: next).month ?? 0
+                    store.visibleMonthAnchor = next
+                    selectedDate = cal.date(byAdding: .month, value: delta, to: selectedDate) ?? next
+                    Task { await store.refreshCalendarData(forMonthContaining: next) }
                 }
-            }
+            )
         }
     }
 
