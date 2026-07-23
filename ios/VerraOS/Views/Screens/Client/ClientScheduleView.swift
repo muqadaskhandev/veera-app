@@ -123,7 +123,9 @@ struct ClientScheduleView: View {
                     Text("\(weeklyCount)")
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.Color.background)
-                    Text(weeklyCount == 1 ? "session" : "sessions")
+                        .contentTransition(.numericText())
+                        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: weeklyCount)
+                    Text(weeklyCount == 1 ? "appointment scheduled" : "appointments scheduled")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.Color.background.opacity(0.6))
                 }

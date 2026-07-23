@@ -47,6 +47,7 @@ enum SessionService {
         }
 
         let session = Session(
+            id: payload.id,
             trainerID: try trainer.requireID(),
             clientID: payload.clientID,
             clientName: payload.clientName,

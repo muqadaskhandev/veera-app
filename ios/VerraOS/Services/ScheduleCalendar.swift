@@ -29,38 +29,29 @@ enum ScheduleCalendar {
         return calendar.date(from: components)
     }
 
-    /// Sessions whose wall-clock day (in the session timezone) matches the
-    /// civil day the user tapped on the strip (in the viewer calendar).
+    /// Sessions whose wall-clock day matches the civil day the user tapped.
     static func sessions(_ sessions: [Session], on date: Date, calendar: Calendar = .current) -> [Session] {
-        let selectedDay = calendar.dateComponents([.year, .month, .day], from: date)
+        let selectedDay = calendar.startOfDay(for: date)
         return sessions
             .filter { session in
-                let sessionDay = session.displayCalendar.dateComponents(
-                    [.year, .month, .day],
-                    from: session.scheduledAt
-                )
-                return sessionDay.year == selectedDay.year
-                    && sessionDay.month == selectedDay.month
-                    && sessionDay.day == selectedDay.day
+                calendar.startOfDay(for: session.scheduledAt) == selectedDay
             }
             .sorted { $0.startMinutes < $1.startMinutes }
     }
 
     /// Sessions whose session-zone civil day falls in the Monday-based week strip.
     static func sessionsInWeek(_ sessions: [Session], containing anchor: Date = Date(), calendar: Calendar = .current) -> [Session] {
-        let week = week(containing: anchor, calendar: calendar)
-        guard !week.isEmpty else { return [] }
-        let selectedDays: Set<DateComponents> = Set(
-            week.map { calendar.dateComponents([.year, .month, .day], from: $0) }
-        )
+        let weekDays = week(containing: anchor, calendar: calendar)
+        guard let first = weekDays.first, let last = weekDays.last else { return [] }
+        let start = calendar.startOfDay(for: first)
+        guard let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: last)) else {
+            return []
+        }
         return sessions.filter { session in
-            let sessionDay = session.displayCalendar.dateComponents(
-                [.year, .month, .day],
-                from: session.scheduledAt
-            )
-            return selectedDays.contains {
-                $0.year == sessionDay.year && $0.month == sessionDay.month && $0.day == sessionDay.day
-            }
+            // Match the week strip with the viewer's calendar so volume/dots stay in sync
+            // with the days the trainer is looking at (avoids TZ component mismatches).
+            let day = calendar.startOfDay(for: session.scheduledAt)
+            return day >= start && day < end
         }
     }
 }

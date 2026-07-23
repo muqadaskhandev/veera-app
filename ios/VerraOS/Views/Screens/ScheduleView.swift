@@ -37,7 +37,10 @@ struct ScheduleView: View {
     }
 
     private var weeklyVolume: Int {
-        store.sessionsInWeek(containing: selectedDate).count
+        // Read coachingSessions directly so @Observable tracks `sessions` for this card.
+        ScheduleCalendar.sessionsInWeek(store.coachingSessions, containing: selectedDate)
+            .filter { !$0.isSkipped }
+            .count
     }
 
     private var weeklyVolumeTrend: (isUp: Bool, delta: Int) {
@@ -210,11 +213,13 @@ struct ScheduleView: View {
                     Text("\(weeklyVolume)")
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.Color.background)
+                        .contentTransition(.numericText())
+                        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: weeklyVolume)
                     if weeklyVolumeTrend.delta > 0 {
                         TrendBadge(isUp: weeklyVolumeTrend.isUp, value: weeklyVolumeTrend.delta)
                     }
                 }
-                Text("sessions this week")
+                Text(weeklyVolume == 1 ? "appointment scheduled" : "appointments scheduled")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.Color.background.opacity(0.6))
             }

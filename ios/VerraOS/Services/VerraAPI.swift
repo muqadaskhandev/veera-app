@@ -781,6 +781,7 @@ enum VerraAPI {
     // MARK: - Sessions
 
     struct CreateSessionBody: Encodable {
+        let id: UUID
         let clientID: UUID?
         let clientName: String
         let focus: String

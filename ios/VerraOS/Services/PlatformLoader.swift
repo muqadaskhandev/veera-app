@@ -25,7 +25,8 @@ enum SessionLoader {
 
     static func createBody(from session: Session, clientID: UUID?) -> VerraAPI.CreateSessionBody {
         VerraAPI.CreateSessionBody(
-            clientID: clientID,
+            id: session.id,
+            clientID: clientID ?? session.clientID,
             clientName: session.clientName,
             focus: session.focus,
             location: session.location,

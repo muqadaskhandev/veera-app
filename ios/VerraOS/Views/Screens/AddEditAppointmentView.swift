@@ -497,6 +497,7 @@ struct AddEditAppointmentView: View {
     }
 
     private func commitSave() {
+        clientStore.syncRoster(to: store)
         let tag = type.tag
         let name = selectedClient?.name ?? "Client"
         let initials = selectedClient?.initials ?? "?"

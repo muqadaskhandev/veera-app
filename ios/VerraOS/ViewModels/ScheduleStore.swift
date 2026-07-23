@@ -125,11 +125,15 @@ final class ScheduleStore {
     /// Week-over-week change in scheduled coaching volume.
     func weeklyVolumeTrend(containing anchor: Date = Date()) -> (isUp: Bool, delta: Int) {
         let calendar = Calendar.current
-        let thisWeek = sessionsInWeek(containing: anchor).count
+        let thisWeek = ScheduleCalendar.sessionsInWeek(coachingSessions, containing: anchor)
+            .filter { !$0.isSkipped }
+            .count
         guard let lastWeekAnchor = calendar.date(byAdding: .weekOfYear, value: -1, to: anchor) else {
             return (thisWeek >= 0, 0)
         }
-        let lastWeek = ScheduleCalendar.sessionsInWeek(coachingSessions, containing: lastWeekAnchor).count
+        let lastWeek = ScheduleCalendar.sessionsInWeek(coachingSessions, containing: lastWeekAnchor)
+            .filter { !$0.isSkipped }
+            .count
         let delta = thisWeek - lastWeek
         return (delta >= 0, abs(delta))
     }
@@ -473,7 +477,7 @@ final class ScheduleStore {
     }
 
     private func clientID(for session: Session) -> UUID? {
-        clients.first(where: { $0.name == session.clientName })?.id
+        session.clientID ?? clients.first(where: { $0.name == session.clientName })?.id
     }
 
     private func persistSession(_ session: Session) {
@@ -481,8 +485,8 @@ final class ScheduleStore {
         pendingPersistIDs.insert(session.id)
         Task { @MainActor in
             defer { pendingPersistIDs.remove(session.id) }
+            let clientID = clientID(for: session)
             do {
-                let clientID = clientID(for: session)
                 _ = try await VerraAPI.updateSession(
                     id: session.id,
                     body: SessionLoader.updateBody(from: session, clientID: clientID),
@@ -491,11 +495,13 @@ final class ScheduleStore {
             } catch {
                 do {
                     let created = try await VerraAPI.createSession(
-                        SessionLoader.createBody(from: session, clientID: clientID(for: session)),
+                        SessionLoader.createBody(from: session, clientID: clientID),
                         accessToken: token
                     )
                     if let index = sessions.firstIndex(where: { $0.id == session.id }) {
                         sessions[index] = SessionLoader.session(from: created)
+                    } else if sessions.contains(where: { $0.id == created.id }) == false {
+                        sessions.append(SessionLoader.session(from: created))
                     }
                 } catch {
                     // Local schedule remains usable offline.
@@ -601,7 +607,8 @@ final class ScheduleStore {
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[index] = session
         } else {
-            sessions.append(session)
+            // Reassign so @Observable always publishes a change for the home counter.
+            sessions = sessions + [session]
         }
         syncSessionToCalendar(session)
         persistSession(session)
