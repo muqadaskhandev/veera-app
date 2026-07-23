@@ -205,6 +205,8 @@ enum ProfileService {
 
     static func trainerDTO(for trainer: Trainer, on database: any Database) async throws -> TrainerDTO {
         let trainerID = try trainer.requireID()
+        let publicAnswers = try await publicCoachingAnswers(for: trainer, on: database)
+
         if let trainerUser = try await trainer.$user.get(on: database),
            let userID = trainerUser.id,
            let profile = try await Profile.query(on: database)
@@ -219,10 +221,59 @@ enum ProfileService {
                 avatarURL: AvatarService.publicURL(
                     for: profile.avatarPath,
                     cacheVersion: profile.updatedAt.map { String(Int($0.timeIntervalSince1970)) }
-                )
+                ),
+                experience: publicAnswers.experience,
+                trainingLocation: publicAnswers.trainingLocation,
+                coachingFocus: publicAnswers.coachingFocus
             )
         }
-        return try TrainerDTO(from: trainer)
+
+        var dto = try TrainerDTO(from: trainer)
+        dto = TrainerDTO(
+            id: dto.id,
+            name: dto.name,
+            title: dto.title,
+            bio: dto.bio,
+            specialties: dto.specialties,
+            avatarURL: dto.avatarURL,
+            experience: publicAnswers.experience,
+            trainingLocation: publicAnswers.trainingLocation,
+            coachingFocus: publicAnswers.coachingFocus
+        )
+        return dto
+    }
+
+    private struct PublicCoachingAnswers {
+        let experience: String?
+        let trainingLocation: String?
+        let coachingFocus: [String]?
+    }
+
+    /// Only experience / location / focus — never gender, age, client count, or referral.
+    private static func publicCoachingAnswers(
+        for trainer: Trainer,
+        on database: any Database
+    ) async throws -> PublicCoachingAnswers {
+        guard let userID = trainer.$user.id,
+              let onboarding = try await TrainerOnboarding.query(on: database)
+                .filter(\.$user.$id == userID)
+                .first(),
+              let data = onboarding.answersJSON.data(using: .utf8),
+              let answers = try? JSONDecoder().decode([String: String].self, from: data)
+        else {
+            return PublicCoachingAnswers(experience: nil, trainingLocation: nil, coachingFocus: nil)
+        }
+
+        let focus = answers["focus"]?
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return PublicCoachingAnswers(
+            experience: answers["tenure"].flatMap { $0.isEmpty ? nil : $0 },
+            trainingLocation: answers["location"].flatMap { $0.isEmpty ? nil : $0 },
+            coachingFocus: (focus?.isEmpty == false) ? focus : nil
+        )
     }
 
     private static func syncTrainerTables(

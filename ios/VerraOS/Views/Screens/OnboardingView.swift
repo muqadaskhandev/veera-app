@@ -216,8 +216,8 @@ struct OnboardingView: View {
                 headline: [Seg("How long have you been a "), Seg("personal trainer", accent: true), Seg("?")],
                 options: [
                     OBOption("Less than 1 year"),
-                    OBOption("1–3 years"),
-                    OBOption("3–5 years"),
+                    OBOption("1 – 3 years"),
+                    OBOption("3 – 5 years"),
                     OBOption("5+ years"),
                 ]
             )),
@@ -322,7 +322,13 @@ struct OnboardingView: View {
 
             if showingLogin && !isInviteScreen {
                 VStack(spacing: 0) {
-                    Spacer().frame(height: 12)
+                    HStack {
+                        backButton
+                        Spacer()
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.top, 12)
+
                     loginBody
                         .padding(.horizontal, 28)
                     Spacer()
@@ -335,7 +341,13 @@ struct OnboardingView: View {
 
             if showingForgotPassword && !showingResetPassword && !isInviteScreen {
                 VStack(spacing: 0) {
-                    Spacer().frame(height: 12)
+                    HStack {
+                        backButton
+                        Spacer()
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.top, 12)
+
                     forgotPasswordBody
                         .padding(.horizontal, 28)
                     Spacer()
@@ -494,6 +506,16 @@ struct OnboardingView: View {
     }
 
     private var loginBody: some View {
+        Group {
+            if showingLoginEmailFields {
+                loginEmailFormBody
+            } else {
+                loginOptionsBody
+            }
+        }
+    }
+
+    private var loginOptionsBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer()
             (
@@ -512,10 +534,10 @@ struct OnboardingView: View {
 
                 Button(action: {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        showingLoginEmailFields.toggle()
+                        showingLoginEmailFields = true
                     }
                 }) {
-                    Text(showingLoginEmailFields ? "Hide Email Form" : "Continue with Email")
+                    Text("Continue with Email")
                         .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.Color.accentInk)
                         .frame(maxWidth: .infinity)
@@ -524,48 +546,61 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isSaving)
+            }
+            .padding(.top, 36)
 
-                if showingLoginEmailFields {
-                    VStack(spacing: 12) {
-                        registerField("Email", text: $loginEmail)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.emailAddress)
-                        passwordField("Password", text: $loginPassword)
+            Spacer()
+        }
+    }
 
-                        Button(action: { Task { await signInWithEmail() } }) {
-                            Text(isSaving ? "Signing in…" : "Sign In")
-                                .font(.system(size: 17, weight: .bold, design: .rounded))
-                                .foregroundStyle(Theme.Color.accentInk)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(Theme.Color.accent, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isSaving || !canSubmitLogin)
-                        .opacity(canSubmitLogin ? 1 : 0.45)
+    private var loginEmailFormBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer()
+            (
+                Text("Sign in\n").foregroundStyle(.white)
+                + Text("with your email").foregroundStyle(.white.opacity(0.45))
+            )
+            .font(.system(size: 36, weight: .black))
+            .fontWidth(.condensed)
+            .textCase(.uppercase)
+            .fixedSize(horizontal: false, vertical: true)
 
-                        HStack {
-                            Button(action: { openForgotPassword() }) {
-                                Text("Forgot password?")
-                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(.white.opacity(0.65))
-                            }
-                            .buttonStyle(.plain)
+            VStack(spacing: 12) {
+                registerField("Email", text: $loginEmail)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.emailAddress)
+                passwordField("Password", text: $loginPassword)
 
-                            Spacer()
-
-                            Button(action: { openResetPassword() }) {
-                                Text("Have a reset code?")
-                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(Theme.Color.accent.opacity(0.9))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.top, 4)
-                    }
-                    .padding(.top, 4)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                Button(action: { Task { await signInWithEmail() } }) {
+                    Text(isSaving ? "Signing in…" : "Sign In")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.Color.accentInk)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Theme.Color.accent, in: Capsule())
                 }
+                .buttonStyle(.plain)
+                .disabled(isSaving || !canSubmitLogin)
+                .opacity(canSubmitLogin ? 1 : 0.45)
+
+                HStack {
+                    Button(action: { openForgotPassword() }) {
+                        Text("Forgot password?")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Button(action: { openResetPassword() }) {
+                        Text("Have a reset code?")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Theme.Color.accent.opacity(0.9))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 4)
             }
             .padding(.top, 36)
 
@@ -994,6 +1029,7 @@ struct OnboardingView: View {
             Spacer()
 
             legalFooter
+                .padding(.bottom, 4)
         }
     }
 
@@ -1017,7 +1053,7 @@ struct OnboardingView: View {
                         .padding(.top, 18)
                 }
 
-                VStack(spacing: 12) {
+                VStack(spacing: 14) {
                     VStack(alignment: .leading, spacing: 8) {
                         registerField("Username", text: $registerUsername)
                             .textInputAutocapitalization(.never)
@@ -1029,16 +1065,7 @@ struct OnboardingView: View {
                                 scheduleUsernameCheck(newValue)
                             }
 
-                        if let usernameStatusText {
-                            HStack(spacing: 6) {
-                                Image(systemName: usernameStatusIcon)
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text(usernameStatusText)
-                                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            }
-                            .foregroundStyle(usernameStatusColor)
-                            .padding(.horizontal, 4)
-                        }
+                        usernameAvailabilityBanner
                     }
 
                     registerField("Email", text: $registerEmail)
@@ -1059,7 +1086,7 @@ struct OnboardingView: View {
                     passwordValidationMessages(password: registerPassword, confirm: registerPasswordConfirm)
 
                     Button(action: { Task { await signUpWithEmail() } }) {
-                        Text(isSaving ? "Saving…" : "Save & Continue")
+                        Text(isSaving ? "Creating account…" : "Create Account")
                             .font(.system(size: 17, weight: .bold, design: .rounded))
                             .foregroundStyle(Theme.Color.accentInk)
                             .frame(maxWidth: .infinity)
@@ -1072,41 +1099,78 @@ struct OnboardingView: View {
                 }
                 .padding(.top, 28)
 
-                Spacer(minLength: 32)
-
                 legalFooter
-                    .padding(.bottom, 8)
+                    .padding(.top, 36)
+                    .padding(.bottom, 16)
             }
             .padding(.horizontal, 28)
         }
         .opacity(appeared ? 1 : 0)
     }
 
+    @ViewBuilder
+    private var usernameAvailabilityBanner: some View {
+        if let usernameStatusText {
+            HStack(spacing: 8) {
+                if usernameAvailability == .checking {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white.opacity(0.7))
+                } else {
+                    Image(systemName: usernameStatusIcon)
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                Text(usernameStatusText)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(usernameStatusColor)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(usernameStatusColor.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.sm)
+                    .stroke(usernameStatusColor.opacity(0.35), lineWidth: 1)
+            )
+        }
+    }
+
     /// Shared Terms of Use / Privacy Policy footer for both register screens.
     private var legalFooter: some View {
-        VStack(spacing: 4) {
-            Text("By continuing, you agree to our")
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(.white.opacity(0.5))
-            HStack(spacing: 4) {
+        VStack(spacing: 10) {
+            Rectangle()
+                .fill(.white.opacity(0.12))
+                .frame(height: 1)
+
+            Text("By continuing, you agree to Verra’s")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 0) {
                 Button(action: { openURL(legalURL) }) {
                     Text("Terms of Use")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(Theme.Color.accent)
+                        .underline()
                 }
                 .buttonStyle(.plain)
-                Text("and")
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.5))
+
+                Text("  ·  ")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.35))
+
                 Button(action: { openURL(legalURL) }) {
                     Text("Privacy Policy")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(Theme.Color.accent)
+                        .underline()
                 }
                 .buttonStyle(.plain)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .center)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
     }
 
     // MARK: Profile setup
@@ -1534,12 +1598,21 @@ struct OnboardingView: View {
             return
         }
         if showingLogin {
+            if showingLoginEmailFields {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    showingLoginEmailFields = false
+                    loginPassword = ""
+                }
+                return
+            }
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                 showingLogin = false
                 showingLoginEmailFields = false
                 loginEmail = ""
                 loginPassword = ""
             }
+            // Return to the welcome (first) screen.
+            onDismiss()
             return
         }
         if case .invite = current, isInviteEntryScreen {
@@ -1689,11 +1762,11 @@ struct OnboardingView: View {
     private var usernameStatusText: String? {
         switch usernameAvailability {
         case .idle: return nil
-        case .checking: return "Checking…"
-        case .available: return "Username available"
-        case .taken: return "Username taken"
-        case .tooShort: return "At least 3 characters"
-        case .checkFailed: return "Couldn't verify username"
+        case .checking: return "Checking availability…"
+        case .available: return "This username is available"
+        case .taken: return "This username is already taken"
+        case .tooShort: return "Username must be at least 3 characters"
+        case .checkFailed: return "Couldn't verify username — try again"
         }
     }
 

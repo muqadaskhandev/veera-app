@@ -119,6 +119,11 @@ struct TrainerProfile: Codable, Equatable {
     /// Raw JPEG/PNG bytes of the chosen avatar, if any.
     var avatarData: Data?
 
+    /// Client-visible coaching details (from onboarding).
+    var experience: String?
+    var trainingLocation: String?
+    var coachingFocus: [String]
+
     // Notification preferences
     var notificationsEnabled: Bool
     var notifyMoney: Bool
@@ -143,6 +148,9 @@ struct TrainerProfile: Codable, Equatable {
         specialties: [],
         avatarURL: nil,
         avatarData: nil,
+        experience: nil,
+        trainingLocation: nil,
+        coachingFocus: [],
         notificationsEnabled: true,
         notifyMoney: true,
         notifySchedule: true,
@@ -162,6 +170,9 @@ struct TrainerProfile: Codable, Equatable {
         specialties: [.strength, .hypertrophy, .nutrition],
         avatarURL: nil,
         avatarData: nil,
+        experience: "5+ years",
+        trainingLocation: "Commercial Gym",
+        coachingFocus: [CoachingFocus.strengthMuscle.rawValue],
         notificationsEnabled: true,
         notifyMoney: true,
         notifySchedule: true,
@@ -180,5 +191,78 @@ struct TrainerProfile: Codable, Equatable {
         let letters = parts.prefix(2).compactMap { $0.first }
         let result = String(letters).uppercased()
         return result.isEmpty ? "?" : result
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, title, bio, specialties, avatarURL, avatarData
+        case experience, trainingLocation, coachingFocus
+        case notificationsEnabled, notifyMoney, notifySchedule, notifyActivity
+        case activityMode, quietHoursEnabled, quietStartMinutes, quietEndMinutes
+        case biometricLoginEnabled, weightUnit
+    }
+
+    init(
+        name: String,
+        title: String,
+        bio: String,
+        specialties: Set<Specialty>,
+        avatarURL: String?,
+        avatarData: Data?,
+        experience: String? = nil,
+        trainingLocation: String? = nil,
+        coachingFocus: [String] = [],
+        notificationsEnabled: Bool,
+        notifyMoney: Bool,
+        notifySchedule: Bool,
+        notifyActivity: Bool,
+        activityMode: ActivityAlertMode,
+        quietHoursEnabled: Bool,
+        quietStartMinutes: Int,
+        quietEndMinutes: Int,
+        biometricLoginEnabled: Bool,
+        weightUnit: WeightUnit?
+    ) {
+        self.name = name
+        self.title = title
+        self.bio = bio
+        self.specialties = specialties
+        self.avatarURL = avatarURL
+        self.avatarData = avatarData
+        self.experience = experience
+        self.trainingLocation = trainingLocation
+        self.coachingFocus = coachingFocus
+        self.notificationsEnabled = notificationsEnabled
+        self.notifyMoney = notifyMoney
+        self.notifySchedule = notifySchedule
+        self.notifyActivity = notifyActivity
+        self.activityMode = activityMode
+        self.quietHoursEnabled = quietHoursEnabled
+        self.quietStartMinutes = quietStartMinutes
+        self.quietEndMinutes = quietEndMinutes
+        self.biometricLoginEnabled = biometricLoginEnabled
+        self.weightUnit = weightUnit
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        title = try c.decode(String.self, forKey: .title)
+        bio = try c.decode(String.self, forKey: .bio)
+        specialties = try c.decode(Set<Specialty>.self, forKey: .specialties)
+        avatarURL = try c.decodeIfPresent(String.self, forKey: .avatarURL)
+        avatarData = try c.decodeIfPresent(Data.self, forKey: .avatarData)
+        experience = try c.decodeIfPresent(String.self, forKey: .experience)
+        trainingLocation = try c.decodeIfPresent(String.self, forKey: .trainingLocation)
+        coachingFocus = try c.decodeIfPresent([String].self, forKey: .coachingFocus) ?? []
+        notificationsEnabled = try c.decode(Bool.self, forKey: .notificationsEnabled)
+        notifyMoney = try c.decode(Bool.self, forKey: .notifyMoney)
+        notifySchedule = try c.decode(Bool.self, forKey: .notifySchedule)
+        notifyActivity = try c.decode(Bool.self, forKey: .notifyActivity)
+        activityMode = try c.decode(ActivityAlertMode.self, forKey: .activityMode)
+        quietHoursEnabled = try c.decode(Bool.self, forKey: .quietHoursEnabled)
+        quietStartMinutes = try c.decode(Int.self, forKey: .quietStartMinutes)
+        quietEndMinutes = try c.decode(Int.self, forKey: .quietEndMinutes)
+        biometricLoginEnabled = try c.decode(Bool.self, forKey: .biometricLoginEnabled)
+        weightUnit = try c.decodeIfPresent(WeightUnit.self, forKey: .weightUnit)
     }
 }

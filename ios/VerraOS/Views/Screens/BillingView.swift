@@ -95,7 +95,7 @@ struct BillingView: View {
                 .multilineTextAlignment(.center)
             Text(
                 isPaywall
-                    ? "Reactivate Verra Pro to keep scheduling, messaging, and billing your roster without interruption."
+                    ? "Subscribe to Verra Pro to invite clients and keep scheduling, messaging, and billing without interruption."
                     : "Run your coaching business with scheduling, clients, messaging, and financials."
             )
                 .font(.system(size: 15, weight: .medium))

@@ -50,6 +50,10 @@ struct TrainerDTO: Content {
     let bio: String
     let specialties: [String]
     let avatarURL: String?
+    /// Client-visible coaching details from trainer onboarding (optional).
+    let experience: String?
+    let trainingLocation: String?
+    let coachingFocus: [String]?
 
     init(from trainer: Trainer, avatarURL: String? = nil) throws {
         guard let id = trainer.id else {
@@ -61,6 +65,9 @@ struct TrainerDTO: Content {
         self.bio = trainer.bio
         self.specialties = TrainerSpecialties.decode(trainer.specialtiesJSON)
         self.avatarURL = avatarURL
+        self.experience = nil
+        self.trainingLocation = nil
+        self.coachingFocus = nil
     }
 
     init(
@@ -69,7 +76,10 @@ struct TrainerDTO: Content {
         title: String,
         bio: String,
         specialties: [String],
-        avatarURL: String?
+        avatarURL: String?,
+        experience: String? = nil,
+        trainingLocation: String? = nil,
+        coachingFocus: [String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -77,6 +87,9 @@ struct TrainerDTO: Content {
         self.bio = bio
         self.specialties = specialties
         self.avatarURL = avatarURL
+        self.experience = experience
+        self.trainingLocation = trainingLocation
+        self.coachingFocus = coachingFocus
     }
 }
 

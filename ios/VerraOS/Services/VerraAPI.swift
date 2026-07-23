@@ -220,6 +220,13 @@ enum VerraAPI {
         )
     }
 
+    static func fetchTrainerOnboarding(accessToken: String) async throws -> TrainerOnboardingResponse {
+        try await APIClient.shared.request(
+            "/api/onboarding/trainer",
+            token: accessToken
+        )
+    }
+
     struct AppleSignInBody: Encodable {
         let identityToken: String
         let role: String
@@ -1229,11 +1236,20 @@ enum VerraAPI {
         let isActive: Bool
     }
 
-    static func fetchCurrentSubscription(accessToken: String) async -> SubscriptionDTO? {
+    static func fetchCurrentSubscription(accessToken: String) async throws -> SubscriptionDTO {
+        try await APIClient.shared.request("/api/subscriptions/me", token: accessToken)
+    }
+
+    /// Returns the subscription when one exists, or `nil` when the server has none on file.
+    /// Other errors (network, auth) are thrown so callers don't treat a failed check as "no sub".
+    static func fetchCurrentSubscriptionIfPresent(accessToken: String) async throws -> SubscriptionDTO? {
         do {
-            return try await APIClient.shared.request("/api/subscriptions/me", token: accessToken)
-        } catch {
+            return try await fetchCurrentSubscription(accessToken: accessToken)
+        } catch let APIError.server(message)
+            where message.localizedCaseInsensitiveContains("no subscription") {
             return nil
+        } catch {
+            throw error
         }
     }
 

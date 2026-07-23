@@ -57,6 +57,9 @@ struct LinkedTrainerDTO: Codable {
     let bio: String
     let specialties: [String]
     let avatarURL: String?
+    let experience: String?
+    let trainingLocation: String?
+    let coachingFocus: [String]?
 }
 
 struct ProfileSettingsDTO: Codable {
@@ -121,6 +124,9 @@ enum ProfileLoader {
         profile.specialties = Set(linked.specialties.compactMap { Specialty(rawValue: $0) })
         profile.avatarURL = linked.avatarURL
         profile.avatarData = await downloadAvatar(path: linked.avatarURL)
+        profile.experience = linked.experience
+        profile.trainingLocation = linked.trainingLocation
+        profile.coachingFocus = linked.coachingFocus ?? []
         return profile
     }
 

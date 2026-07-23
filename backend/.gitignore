@@ -9,5 +9,6 @@ db.sqlite
 .env
 .env.*
 !.env.example
+render.env
 verra_supabase_migration.sql
 default.profraw

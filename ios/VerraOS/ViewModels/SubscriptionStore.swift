@@ -82,14 +82,28 @@ final class SubscriptionStore {
         isLoading = true
         defer { isLoading = false }
 
-        if let subscription = await VerraAPI.fetchCurrentSubscription(accessToken: token) {
-            apply(subscription)
-        } else if !isAdmin {
-            hasActiveSubscription = false
-            productID = nil
-            expiresAt = nil
-            status = nil
+        do {
+            if let subscription = try await VerraAPI.fetchCurrentSubscriptionIfPresent(accessToken: token) {
+                apply(subscription)
+            } else if !isAdmin {
+                hasActiveSubscription = false
+                productID = nil
+                expiresAt = nil
+                status = nil
+            }
+        } catch {
+            // Keep the last known status on transient failures so an active
+            // subscriber doesn't briefly look unpaid (and see the upsell).
+            lastError = error.localizedDescription
         }
+    }
+
+    /// Refreshes from the server, then returns whether the trainer can invite clients.
+    @MainActor
+    func canInviteClients() async -> Bool {
+        await refreshRole()
+        await refreshFromServer()
+        return isAdmin || hasActiveSubscription
     }
 
     @MainActor

@@ -6,8 +6,7 @@
 import SwiftUI
 import PhotosUI
 
-/// Edit the trainer's client-facing profile: photo, name, title, bio, and
-/// specialty tags. Changes are committed to the TrainerStore on Save.
+/// Edit the trainer's client-facing profile plus private onboarding answers.
 struct EditProfileView: View {
     @Environment(TrainerStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -16,7 +15,11 @@ struct EditProfileView: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var toast: ToastData?
     @State private var isSaving = false
+    @State private var isLoadingOnboarding = true
     @State private var pendingAvatarData: Data?
+    @State private var onboardingAnswers: [String: String] = [:]
+    @State private var selectedFocus: Set<String> = []
+    @State private var referralOtherText = ""
 
     init(profile: TrainerProfile) {
         _draft = State(initialValue: profile)
@@ -30,6 +33,7 @@ struct EditProfileView: View {
                     fieldSection
                     bioSection
                     specialtySection
+                    onboardingSection
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.md)
@@ -54,7 +58,7 @@ struct EditProfileView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
                     .background(Theme.Color.accent, in: Capsule())
-                    .disabled(isSaving)
+                    .disabled(isSaving || isLoadingOnboarding)
                 }
             }
             .toast($toast)
@@ -62,6 +66,7 @@ struct EditProfileView: View {
                 guard let newValue else { return }
                 Task { await loadImage(newValue) }
             }
+            .task { await loadOnboarding() }
         }
     }
 
@@ -151,6 +156,9 @@ struct EditProfileView: View {
     private var specialtySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionLabel("Specialties")
+            Text("Visible to clients")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.Color.inkMuted)
             FlowChips(items: Specialty.allCases) { specialty in
                 let selected = draft.specialties.contains(specialty)
                 SpecialtyChip(label: specialty.rawValue, selected: selected) {
@@ -163,6 +171,104 @@ struct EditProfileView: View {
         }
     }
 
+    // MARK: Onboarding answers
+
+    private var onboardingSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                sectionLabel("Coaching details")
+                Text("Same answers from onboarding. Experience, location, and focus are visible to clients.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.Color.inkMuted)
+            }
+
+            if isLoadingOnboarding {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+            } else {
+                ForEach(TrainerOnboardingFields.editableKeys, id: \.self) { key in
+                    onboardingField(for: key)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func onboardingField(for key: String) -> some View {
+        let options = TrainerOnboardingFields.options(for: key)
+        let clientVisible = TrainerOnboardingFields.clientVisibleKeys.contains(key)
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                sectionLabel(TrainerOnboardingFields.title(for: key))
+                if clientVisible {
+                    Text("CLIENTS SEE")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(Theme.Color.accentInk)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Theme.Color.accent.opacity(0.35), in: Capsule())
+                } else {
+                    Text("PRIVATE")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(Theme.Color.inkMuted)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Theme.Color.surfaceMuted, in: Capsule())
+                }
+            }
+
+            if TrainerOnboardingFields.allowsMultiple(key) {
+                FlowChips(items: options.map { IdentifiedString($0) }) { item in
+                    let selected = selectedFocus.contains(item.value)
+                    SpecialtyChip(label: item.value, selected: selected) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            if selected { selectedFocus.remove(item.value) }
+                            else { selectedFocus.insert(item.value) }
+                        }
+                    }
+                }
+            } else {
+                FlowChips(items: options.map { IdentifiedString($0) }) { item in
+                    let selected = isOptionSelected(key: key, option: item.value)
+                    SpecialtyChip(label: item.value, selected: selected) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            selectSingle(key: key, option: item.value)
+                        }
+                    }
+                }
+            }
+
+            if TrainerOnboardingFields.allowsOtherText(key),
+               onboardingAnswers[key] == "Other" || (!referralOtherText.isEmpty && !options.contains(onboardingAnswers[key] ?? "")) {
+                TextField("Tell us more…", text: $referralOtherText)
+                    .font(.system(size: 15, weight: .medium))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+            }
+        }
+    }
+
+    private func isOptionSelected(key: String, option: String) -> Bool {
+        let value = onboardingAnswers[key] ?? ""
+        if option == "Other" {
+            return value == "Other" || (!value.isEmpty && !TrainerOnboardingFields.options(for: key).contains(value))
+        }
+        return value == option
+    }
+
+    private func selectSingle(key: String, option: String) {
+        onboardingAnswers[key] = option
+        if key == TrainerOnboardingFields.referral, option != "Other" {
+            referralOtherText = ""
+        }
+    }
+
     private func sectionLabel(_ text: String) -> some View {
         Text(text.uppercased())
             .font(.system(size: 11, weight: .bold))
@@ -172,6 +278,31 @@ struct EditProfileView: View {
 
     // MARK: Actions
 
+    private func loadOnboarding() async {
+        guard let token = AuthStore.accessToken else {
+            isLoadingOnboarding = false
+            return
+        }
+        do {
+            let response = try await VerraAPI.fetchTrainerOnboarding(accessToken: token)
+            await MainActor.run {
+                onboardingAnswers = response.answers
+                selectedFocus = Set(TrainerOnboardingFields.focusList(from: response.answers))
+                let referral = response.answers[TrainerOnboardingFields.referral] ?? ""
+                if !referral.isEmpty, !TrainerOnboardingFields.referralOptions.contains(referral) {
+                    referralOtherText = referral
+                    onboardingAnswers[TrainerOnboardingFields.referral] = "Other"
+                }
+                isLoadingOnboarding = false
+            }
+        } catch {
+            await MainActor.run {
+                isLoadingOnboarding = false
+                toast = ToastData(message: "Couldn’t load coaching details", icon: "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
     private func save() async {
         guard !isSaving else { return }
         isSaving = true
@@ -180,6 +311,19 @@ struct EditProfileView: View {
             store.profile = draft
             try await store.saveToServer(avatarUpload: pendingAvatarData)
             pendingAvatarData = nil
+
+            if let token = AuthStore.accessToken {
+                var answers = onboardingAnswers
+                answers[TrainerOnboardingFields.focus] = TrainerOnboardingFields.encodeFocus(selectedFocus)
+                if answers[TrainerOnboardingFields.referral] == "Other" {
+                    let custom = referralOtherText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !custom.isEmpty {
+                        answers[TrainerOnboardingFields.referral] = custom
+                    }
+                }
+                _ = try await VerraAPI.saveTrainerOnboarding(answers: answers, accessToken: token)
+            }
+
             await MainActor.run {
                 toast = ToastData(message: "Profile saved", icon: "checkmark.circle.fill")
                 dismiss()
@@ -194,7 +338,6 @@ struct EditProfileView: View {
     private func loadImage(_ item: PhotosPickerItem) async {
         guard let data = try? await item.loadTransferable(type: Data.self),
               let image = UIImage(data: data) else { return }
-        // Downscale to keep persisted payload small.
         let resized = image.resized(maxDimension: 512)
         if let jpeg = resized.jpegData(compressionQuality: 0.82) {
             await MainActor.run {
@@ -203,6 +346,15 @@ struct EditProfileView: View {
                 toast = ToastData(message: "Photo updated", icon: "photo.fill")
             }
         }
+    }
+}
+
+private struct IdentifiedString: Identifiable {
+    let id: String
+    let value: String
+    init(_ value: String) {
+        self.id = value
+        self.value = value
     }
 }
 
@@ -256,7 +408,6 @@ private struct SpecialtyChip: View {
 }
 
 private extension UIImage {
-    /// Returns a copy scaled so its longest side is at most `maxDimension`.
     func resized(maxDimension: CGFloat) -> UIImage {
         let longest = max(size.width, size.height)
         guard longest > maxDimension else { return self }

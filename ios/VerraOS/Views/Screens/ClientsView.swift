@@ -10,6 +10,7 @@ import SwiftUI
 struct ClientsView: View {
     @Environment(ClientStore.self) private var store
     @Environment(AppState.self) private var app
+    @Environment(SubscriptionStore.self) private var subscription
 
     @State private var search: String = ""
     @State private var sort: ClientSort = .status
@@ -17,6 +18,8 @@ struct ClientsView: View {
     @State private var showingFilters: Bool = false
 
     @State private var showingAdd = false
+    @State private var showingInvitePaywall = false
+    @State private var isCheckingSubscription = false
     @State private var deleteCandidate: Client?
     @State private var invitePayload: InvitePayload?
     @State private var toast: ToastData?
@@ -32,9 +35,16 @@ struct ClientsView: View {
         NavigationStack(path: $path) {
             ZStack {
                 if !hasAnyClients {
-                    EmptyRosterView { showingAdd = true }
+                    EmptyRosterView { Task { await openAddClient() } }
                 } else {
                     content
+                }
+
+                if isCheckingSubscription {
+                    Color.black.opacity(0.12).ignoresSafeArea()
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(Theme.Color.accent)
                 }
             }
             .overlay(alignment: .bottomTrailing) {
@@ -57,6 +67,13 @@ struct ClientsView: View {
             AddClientView { message in
                 toast = ToastData(message: message, icon: "paperplane.fill")
             }
+        }
+        .fullScreenCover(isPresented: $showingInvitePaywall) {
+            BillingView(isPaywall: true, onDismiss: { showingInvitePaywall = false })
+                .environment(subscription)
+        }
+        .onChange(of: subscription.hasActiveSubscription) { _, isActive in
+            if isActive { showingInvitePaywall = false }
         }
         .sheet(item: $invitePayload, onDismiss: {
             toast = ToastData(message: "Invite link ready to share", icon: "link")
@@ -245,10 +262,30 @@ struct ClientsView: View {
         .padding(.vertical, 60)
     }
 
+    /// Verifies subscription with the server before allowing invite actions.
+    @MainActor
+    private func requireActiveSubscription() async -> Bool {
+        guard !isCheckingSubscription else { return false }
+        isCheckingSubscription = true
+        defer { isCheckingSubscription = false }
+        let allowed = await subscription.canInviteClients()
+        if !allowed {
+            showingInvitePaywall = true
+        }
+        return allowed
+    }
+
+    @MainActor
+    private func openAddClient() async {
+        guard await requireActiveSubscription() else { return }
+        showingAdd = true
+    }
+
     /// Fetches (or lazily mints) a real invite code for this client from the
     /// backend before presenting the share sheet, so the link actually works.
     @MainActor
     private func shareInvite(for client: Client) async {
+        guard await requireActiveSubscription() else { return }
         guard let token = AuthStore.accessToken else { return }
         do {
             let link = try await VerraAPI.fetchInviteLink(clientID: client.id, accessToken: token)
@@ -261,7 +298,9 @@ struct ClientsView: View {
     // MARK: Floating add button
 
     private var addButton: some View {
-        Button { showingAdd = true } label: {
+        Button {
+            Task { await openAddClient() }
+        } label: {
             Image(systemName: "plus")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(Theme.Color.accentInk)
