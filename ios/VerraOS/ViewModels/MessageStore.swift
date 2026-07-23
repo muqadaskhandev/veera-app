@@ -52,6 +52,34 @@ final class MessageStore {
         return result.sorted { ($0.lastMessageAt ?? $0.lastActiveAt) > ($1.lastMessageAt ?? $1.lastActiveAt) }
     }
 
+    /// Active (non-archived) conversation count for the inbox header.
+    var activeConversationCount: Int {
+        conversations.filter { !$0.isArchived }.count
+    }
+
+    /// Instant local thread for a client — used so Messages can push before the
+    /// network round-trip finishes. Reuses any existing thread for that client.
+    @MainActor
+    @discardableResult
+    func ensureLocalThread(for client: Client) -> Conversation {
+        if let existing = conversations.first(where: { $0.clientID == client.id }) {
+            // Opening from a client card restores an archived thread.
+            if existing.isArchived {
+                unarchive(existing.id)
+                return conversations.first(where: { $0.id == existing.id }) ?? existing
+            }
+            return existing
+        }
+        let convo = Conversation(
+            id: UUID(),
+            clientID: client.id,
+            clientName: client.name,
+            initials: client.initials
+        )
+        conversations.insert(convo, at: 0)
+        return convo
+    }
+
     /// Archived threads only, most-recent first.
     func archivedInbox(search: String = "") -> [Conversation] {
         var result = conversations.filter { $0.isArchived }
@@ -178,7 +206,9 @@ final class MessageStore {
                     merged.append(convo)
                 }
             }
-            conversations = merged
+            // One thread per client — drop duplicate rows (e.g. from races before
+            // the unique index) and migrate any local placeholder messages.
+            conversations = coalesceByClient(merged)
             isLoadedFromServer = true
         } catch {
             // Keep cached conversations when offline.
@@ -194,7 +224,6 @@ final class MessageStore {
     func loadMessages(for conversationID: UUID) async {
         guard let token = AuthStore.accessToken else { return }
         activeConversationID = conversationID
-        undeleteIfNeeded(conversationID)
         do {
             let page = try await VerraAPI.fetchMessages(conversationID: conversationID, accessToken: token)
             applyMessages(page.messages.map(MessageLoader.message(from:)), to: conversationID)
@@ -207,50 +236,82 @@ final class MessageStore {
 
     @MainActor
     func threadID(for client: Client) async -> UUID {
-        if let existing = conversations.first(where: { $0.clientID == client.id }) {
-            return existing.id
-        }
         guard let token = AuthStore.accessToken else {
-            // Re-check for a race-created local conversation before minting a new one.
-            if let existing = conversations.first(where: { $0.clientID == client.id }) {
-                return existing.id
-            }
-            let convo = Conversation(
-                id: UUID(),
-                clientID: client.id,
-                clientName: client.name,
-                initials: client.initials
-            )
-            conversations.insert(convo, at: 0)
-            return convo.id
+            return ensureLocalThread(for: client).id
         }
 
         do {
             let dto = try await VerraAPI.getOrCreateConversation(clientID: client.id, accessToken: token)
-            let convo = MessageLoader.conversation(from: dto)
-            if let index = conversations.firstIndex(where: { $0.id == convo.id }) {
-                conversations[index] = convo
-            } else {
-                conversations.insert(convo, at: 0)
-            }
-            return convo.id
+            return adoptServerConversation(MessageLoader.conversation(from: dto), for: client.id)
         } catch {
-            // The server call failed — prefer reusing any conversation for this
-            // client that already exists locally (e.g. from a concurrent call
-            // or a since-completed refresh) instead of minting another local
-            // placeholder, which would otherwise produce duplicate threads.
+            // Prefer any local/server thread for this client over minting another.
             if let existing = conversations.first(where: { $0.clientID == client.id }) {
                 return existing.id
             }
-            let convo = Conversation(
-                id: UUID(),
-                clientID: client.id,
-                clientName: client.name,
-                initials: client.initials
-            )
-            conversations.insert(convo, at: 0)
-            return convo.id
+            // Last resort: refresh once, then local placeholder.
+            await refreshFromServer()
+            if let existing = conversations.first(where: { $0.clientID == client.id }) {
+                return existing.id
+            }
+            return ensureLocalThread(for: client).id
         }
+    }
+
+    /// Replaces any local placeholder for `clientID` with the canonical server
+    /// conversation, migrating messages so the UI keeps a single continuous thread.
+    @MainActor
+    @discardableResult
+    private func adoptServerConversation(_ server: Conversation, for clientID: UUID) -> UUID {
+        var adopted = server
+        adopted.isArchived = archivedIDs.contains(server.id)
+
+        let placeholders = conversations.filter { $0.clientID == clientID && $0.id != server.id }
+        let migrated = placeholders.flatMap(\.messages)
+        if !migrated.isEmpty {
+            var messages = adopted.messages
+            for message in migrated where !messages.contains(where: { $0.id == message.id }) {
+                messages.append(message)
+            }
+            adopted.messages = messages.sorted { $0.sentAt < $1.sentAt }
+        }
+
+        conversations.removeAll { $0.clientID == clientID && $0.id != server.id }
+
+        if let index = conversations.firstIndex(where: { $0.id == server.id }) {
+            if conversations[index].messages.count > adopted.messages.count {
+                adopted.messages = conversations[index].messages
+            }
+            conversations[index] = adopted
+        } else {
+            conversations.insert(adopted, at: 0)
+        }
+        conversations = coalesceByClient(conversations)
+        return server.id
+    }
+
+    /// Keeps one conversation per client (most recent / most messages wins).
+    private func coalesceByClient(_ list: [Conversation]) -> [Conversation] {
+        var byClient: [UUID: Conversation] = [:]
+        for convo in list {
+            guard let existing = byClient[convo.clientID] else {
+                byClient[convo.clientID] = convo
+                continue
+            }
+            let existingScore = (existing.lastMessageAt ?? existing.lastActiveAt, existing.messages.count)
+            let newScore = (convo.lastMessageAt ?? convo.lastActiveAt, convo.messages.count)
+            var keep = (newScore.0, newScore.1) > (existingScore.0, existingScore.1) ? convo : existing
+            let drop = keep.id == convo.id ? existing : convo
+            var messages = keep.messages
+            for message in drop.messages where !messages.contains(where: { $0.id == message.id }) {
+                messages.append(message)
+            }
+            keep.messages = messages.sorted { $0.sentAt < $1.sentAt }
+            if existing.isArchived || convo.isArchived {
+                keep.isArchived = archivedIDs.contains(keep.id)
+            }
+            byClient[convo.clientID] = keep
+        }
+        return Array(byClient.values)
     }
 
     @MainActor
@@ -283,8 +344,24 @@ final class MessageStore {
     @MainActor
     func send(_ kind: MessageKind, to id: UUID, attachmentURL: String? = nil) async {
         undeleteIfNeeded(id)
+
+        // Show the bubble immediately — waiting on the network made sends feel laggy.
+        let optimisticID = UUID()
+        let optimistic = Message(
+            id: optimisticID,
+            kind: kind,
+            isOutgoing: true,
+            sentAt: .now,
+            attachmentURL: attachmentURL,
+            deliveryStatus: .sent
+        )
+        append(optimistic, to: id)
+        updatePreview(for: id, preview: kind.preview, at: .now)
+
         guard let token = AuthStore.accessToken else {
-            enqueueOffline(kind: kind, conversationID: id, attachmentURL: attachmentURL)
+            ChatOfflineQueue.enqueue(
+                PendingChatMessage(conversationID: id, kind: kind, attachmentURL: attachmentURL)
+            )
             return
         }
 
@@ -295,9 +372,12 @@ final class MessageStore {
                 attachmentURL: attachmentURL,
                 accessToken: token
             )
-            append(MessageLoader.message(from: dto), to: id)
+            replaceMessage(optimisticID, with: MessageLoader.message(from: dto), in: id)
             updatePreview(for: id, preview: kind.preview, at: dto.createdAt ?? .now)
         } catch {
+            // Drop the temp bubble and fall back to the offline queue (which
+            // re-adds a local copy and retries on the next sync).
+            removeMessage(optimisticID, from: id)
             enqueueOffline(kind: kind, conversationID: id, attachmentURL: attachmentURL)
         }
     }
@@ -315,15 +395,39 @@ final class MessageStore {
                 mimeType: upload.mimeType,
                 accessToken: token
             )
-            let dto = try await VerraAPI.sendMessage(
-                conversationID: conversationID,
+
+            // Bubble appears as soon as the file is uploaded; message create is usually fast after that.
+            let optimisticID = UUID()
+            let optimistic = Message(
+                id: optimisticID,
                 kind: upload.kind,
+                isOutgoing: true,
+                sentAt: .now,
                 attachmentURL: response.attachmentURL,
-                accessToken: token
+                deliveryStatus: .sent
             )
-            append(MessageLoader.message(from: dto), to: conversationID)
-            updatePreview(for: conversationID, preview: upload.kind.preview, at: dto.createdAt ?? .now)
-            return true
+            append(optimistic, to: conversationID)
+            updatePreview(for: conversationID, preview: upload.kind.preview, at: .now)
+
+            do {
+                let dto = try await VerraAPI.sendMessage(
+                    conversationID: conversationID,
+                    kind: upload.kind,
+                    attachmentURL: response.attachmentURL,
+                    accessToken: token
+                )
+                replaceMessage(optimisticID, with: MessageLoader.message(from: dto), in: conversationID)
+                updatePreview(for: conversationID, preview: upload.kind.preview, at: dto.createdAt ?? .now)
+                return true
+            } catch {
+                removeMessage(optimisticID, from: conversationID)
+                enqueueOffline(
+                    kind: upload.kind,
+                    conversationID: conversationID,
+                    attachmentURL: response.attachmentURL
+                )
+                return true
+            }
         } catch {
             return false
         }
@@ -459,6 +563,33 @@ final class MessageStore {
             conversations[index].lastActiveAt = message.sentAt
         }
         return inserted
+    }
+
+    /// Swaps a temporary optimistic bubble for the server-confirmed message.
+    /// If a live `message.new` event already inserted the server row, just drop the temp.
+    @MainActor
+    private func replaceMessage(_ optimisticID: UUID, with server: Message, in conversationID: UUID) {
+        updateMessages(in: conversationID) { messages in
+            if let index = messages.firstIndex(where: { $0.id == optimisticID }) {
+                if messages.contains(where: { $0.id == server.id }) {
+                    messages.remove(at: index)
+                } else {
+                    messages[index] = server
+                }
+            } else if !messages.contains(where: { $0.id == server.id }) {
+                messages.append(server)
+            }
+        }
+        if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+            conversations[index].lastActiveAt = server.sentAt
+        }
+    }
+
+    @MainActor
+    private func removeMessage(_ messageID: UUID, from conversationID: UUID) {
+        updateMessages(in: conversationID) { messages in
+            messages.removeAll { $0.id == messageID }
+        }
     }
 
     @MainActor

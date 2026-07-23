@@ -62,6 +62,30 @@ enum ChatMediaService {
             kind: .voice(seconds: max(1, duration))
         )
     }
+
+    static func prepareFile(from url: URL) -> PreparedUpload? {
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+        let name = url.lastPathComponent
+        let ext = url.pathExtension.lowercased()
+        let mimeType: String
+        switch ext {
+        case "pdf": mimeType = "application/pdf"
+        case "txt": mimeType = "text/plain"
+        case "csv": mimeType = "text/csv"
+        case "doc": mimeType = "application/msword"
+        case "docx": mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        case "zip": mimeType = "application/zip"
+        case "rtf": mimeType = "application/rtf"
+        default: mimeType = "application/octet-stream"
+        }
+        let safeName = name.isEmpty ? "file.\(ext.isEmpty ? "bin" : ext)" : name
+        return PreparedUpload(
+            data: data,
+            filename: safeName,
+            mimeType: mimeType,
+            kind: .file(name: safeName)
+        )
+    }
 }
 
 private extension UIImage {

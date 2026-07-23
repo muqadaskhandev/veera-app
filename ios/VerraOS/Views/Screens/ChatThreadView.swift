@@ -10,6 +10,7 @@
 import SwiftUI
 import PhotosUI
 import AVKit
+import UniformTypeIdentifiers
 
 struct ChatThreadView: View {
     let conversationID: UUID
@@ -37,6 +38,7 @@ struct ChatThreadView: View {
     @State private var showingCamera = false
     @State private var cameraMode: CameraPicker.Mode = .photo
     @State private var isUploadingMedia = false
+    @State private var showingFileImporter = false
 
     private var conversation: Conversation? { store.conversation(id: conversationID) }
     private var client: Client? {
@@ -66,7 +68,9 @@ struct ChatThreadView: View {
         }
         .onAppear {
             if !coachMode { app.isChatThreadOpen = true }
-            Task { await store.loadMessages(for: conversationID) }
+        }
+        .task(id: conversationID) {
+            await store.loadMessages(for: conversationID)
         }
         .onDisappear {
             if voiceRecorder.isRecording { voiceRecorder.cancel() }
@@ -260,6 +264,17 @@ struct ChatThreadView: View {
                     Task { await handleGallerySelection(item) }
                 }
 
+                Button {
+                    showingFileImporter = true
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(Theme.Color.inkMuted)
+                        .frame(width: 36, height: 40)
+                }
+                .buttonStyle(.plain)
+                .disabled(isUploadingMedia || voiceRecorder.isRecording)
+
                 cameraButton
 
                 HStack(alignment: .bottom, spacing: 8) {
@@ -304,6 +319,20 @@ struct ChatThreadView: View {
         }
         .background(Theme.Color.background)
         .overlay(alignment: .top) { Rectangle().fill(Theme.Color.hairline).frame(height: 1) }
+        .fileImporter(
+            isPresented: $showingFileImporter,
+            allowedContentTypes: [
+                .pdf, .plainText, .commaSeparatedText, .rtf, .data,
+                UTType(filenameExtension: "doc") ?? .data,
+                UTType(filenameExtension: "docx") ?? .data,
+                UTType(filenameExtension: "zip") ?? .zip,
+                UTType(filenameExtension: "pages") ?? .data,
+                UTType(filenameExtension: "numbers") ?? .data
+            ],
+            allowsMultipleSelection: false
+        ) { result in
+            Task { await handleFileImport(result) }
+        }
         .overlay {
             if isUploadingMedia {
                 ZStack {
@@ -501,6 +530,27 @@ struct ChatThreadView: View {
     }
 
     @MainActor
+    private func handleFileImport(_ result: Result<[URL], Error>) async {
+        switch result {
+        case .failure:
+            toast = ToastData(message: "Couldn't open that file", icon: "exclamationmark.triangle.fill")
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+
+            isUploadingMedia = true
+            defer { isUploadingMedia = false }
+
+            guard let upload = ChatMediaService.prepareFile(from: url) else {
+                toast = ToastData(message: "Couldn't load that file", icon: "exclamationmark.triangle.fill")
+                return
+            }
+            await sendPreparedUpload(upload, successMessage: "File sent", icon: "doc.fill")
+        }
+    }
+
+    @MainActor
     private func sendPreparedUpload(
         _ upload: ChatMediaService.PreparedUpload,
         successMessage: String,
@@ -560,12 +610,12 @@ private struct MessageBubble: View {
                     .font(.system(size: 15.5, weight: .medium))
                     .foregroundStyle(message.isOutgoing ? Theme.Color.accentInk : Theme.Color.ink)
                     .multilineTextAlignment(message.isOutgoing ? .trailing : .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: bubbleMaxWidth - 28, alignment: message.isOutgoing ? .trailing : .leading)
+                    .fixedSize(horizontal: true, vertical: true)
                 if message.isOutgoing {
                     MessageDeliveryIndicator(status: message.deliveryStatus, onAccentBackground: true)
                 }
             }
-            .frame(maxWidth: bubbleMaxWidth, alignment: message.isOutgoing ? .trailing : .leading)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(bubbleBackground, in: RoundedRectangle(cornerRadius: 20))
@@ -592,6 +642,15 @@ private struct MessageBubble: View {
                 bubbleBackground: bubbleBackground,
                 isOutgoing: message.isOutgoing
             )
+        case .file(let name):
+            FileAttachmentBubble(
+                name: name,
+                path: message.attachmentURL,
+                isOutgoing: message.isOutgoing,
+                deliveryStatus: message.deliveryStatus,
+                bubbleBackground: bubbleBackground,
+                maxWidth: bubbleMaxWidth
+            )
         }
     }
 
@@ -602,7 +661,7 @@ private struct MessageBubble: View {
     /// Caps text bubble width so short messages hug their content instead of
     /// stretching edge-to-edge, while long messages still wrap sensibly.
     private var bubbleMaxWidth: CGFloat {
-        min(260, UIScreen.main.bounds.width * 0.75)
+        min(260, UIScreen.main.bounds.width * 0.72)
     }
 
     @ViewBuilder private var outgoingDeliveryBadge: some View {
@@ -812,5 +871,81 @@ private struct VoiceNoteBubble: View {
         let pattern: [CGFloat] = [8, 14, 20, 11, 24, 16, 9, 18, 26, 13, 7, 19, 22, 10, 15, 23, 12, 8]
         let scale: CGFloat = isPlaying ? 1.15 : 1
         return pattern[index % pattern.count] * scale
+    }
+}
+
+// MARK: - File attachment bubble
+
+private struct FileAttachmentBubble: View {
+    let name: String
+    let path: String?
+    let isOutgoing: Bool
+    let deliveryStatus: MessageDeliveryStatus
+    let bubbleBackground: Color
+    let maxWidth: CGFloat
+
+    @State private var isOpening = false
+    @State private var shareURL: URL?
+
+    var body: some View {
+        Button {
+            guard let path, !isOpening else { return }
+            isOpening = true
+            Task {
+                let url = await ChatAttachmentLoader.localDocumentURL(for: path, fileName: name)
+                await MainActor.run {
+                    isOpening = false
+                    shareURL = url
+                    if url == nil {
+                        // No toast channel here — button simply no-ops if download fails.
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "doc.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(isOutgoing ? Theme.Color.accentInk : Theme.Color.ink)
+                    .frame(width: 34, height: 34)
+                    .background(
+                        (isOutgoing ? Theme.Color.accentInk : Theme.Color.ink).opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 8)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(isOutgoing ? Theme.Color.accentInk : Theme.Color.ink)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Text(isOpening ? "Opening…" : "Tap to open")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(isOutgoing ? Theme.Color.accentInk.opacity(0.7) : Theme.Color.inkMuted)
+                }
+
+                if isOutgoing {
+                    MessageDeliveryIndicator(status: deliveryStatus, onAccentBackground: true)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: maxWidth, alignment: .leading)
+            .background(bubbleBackground, in: RoundedRectangle(cornerRadius: 20))
+            .overlay {
+                if !isOutgoing {
+                    RoundedRectangle(cornerRadius: 20).stroke(Theme.Color.hairline, lineWidth: 1)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(path == nil)
+        .sheet(isPresented: Binding(
+            get: { shareURL != nil },
+            set: { if !$0 { shareURL = nil } }
+        )) {
+            if let shareURL {
+                ShareSheet(items: [shareURL])
+            }
+        }
     }
 }

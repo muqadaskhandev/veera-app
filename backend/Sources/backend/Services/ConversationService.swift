@@ -74,8 +74,18 @@ enum ConversationService {
                 clientName: client.name,
                 initials: client.initials
             )
-            try await conversation.save(on: database)
-            return conversation
+            do {
+                try await conversation.save(on: database)
+                return conversation
+            } catch {
+                if let existing = try await Conversation.query(on: database)
+                    .filter(\.$trainer.$id == client.$trainer.id)
+                    .filter(\.$client.$id == clientID)
+                    .first() {
+                    return existing
+                }
+                throw error
+            }
         }
 
         guard let trainer = try await Trainer.query(on: database)
@@ -101,11 +111,21 @@ enum ConversationService {
             clientName: client.name,
             initials: client.initials
         )
-        try await conversation.save(on: database)
-        return conversation
-    }
-
-    static func getOrCreateForCurrentClient(user: User, on database: any Database) async throws -> Conversation {
+        do {
+            try await conversation.save(on: database)
+            return conversation
+        } catch {
+            // Concurrent create raced the unique (trainer_id, client_id) index —
+            // return the row that won instead of surfacing an error (which caused
+            // the iOS client to mint a duplicate local placeholder).
+            if let existing = try await Conversation.query(on: database)
+                .filter(\.$trainer.$id == client.$trainer.id)
+                .filter(\.$client.$id == clientID)
+                .first() {
+                return existing
+            }
+            throw error
+        }
         guard user.userRole == .client else {
             throw Abort(.forbidden)
         }
@@ -128,8 +148,17 @@ enum ConversationService {
             clientName: client.name,
             initials: client.initials
         )
-        try await conversation.save(on: database)
-        return conversation
+        do {
+            try await conversation.save(on: database)
+            return conversation
+        } catch {
+            if let existing = try await Conversation.query(on: database)
+                .filter(\.$client.$id == client.id!)
+                .first() {
+                return existing
+            }
+            throw error
+        }
     }
 
     static func requireConversation(_ id: UUID, for user: User, on database: any Database) async throws -> Conversation {
@@ -468,6 +497,7 @@ enum ConversationService {
         case "photo": return "📷 Photo"
         case "video": return "🎥 Video message"
         case "voice": return "🎤 Voice message"
+        case "file": return body.isEmpty ? "📎 File" : "📎 \(body)"
         default: return body.isEmpty ? "Message" : body
         }
     }

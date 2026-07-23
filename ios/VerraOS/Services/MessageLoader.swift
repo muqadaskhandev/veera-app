@@ -106,6 +106,7 @@ enum MessageLoader {
         case .photo: return "photo"
         case .video: return "video"
         case .voice: return "voice"
+        case .file: return "file"
         }
     }
 
@@ -115,6 +116,7 @@ enum MessageLoader {
         case .photo: return "Photo"
         case .video: return "Video message"
         case .voice(let seconds): return "\(seconds)"
+        case .file(let name): return name
         }
     }
 
@@ -125,6 +127,8 @@ enum MessageLoader {
         case "voice":
             let seconds = Int(body) ?? 0
             return .voice(seconds: max(1, seconds))
+        case "file":
+            return .file(name: body.isEmpty ? "File" : body)
         default: return .text(body)
         }
     }

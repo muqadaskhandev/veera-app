@@ -23,6 +23,7 @@ enum MessageKind: Hashable {
     case photo
     case video
     case voice(seconds: Int)
+    case file(name: String)
 
     /// Inbox preview text for the conversation list.
     var preview: String {
@@ -31,6 +32,7 @@ enum MessageKind: Hashable {
         case .photo: return "📷 Photo"
         case .video: return "🎥 Video message"
         case .voice: return "🎤 Voice message"
+        case .file(let name): return name.isEmpty ? "📎 File" : "📎 \(name)"
         }
     }
 }

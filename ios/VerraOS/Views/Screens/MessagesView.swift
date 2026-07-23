@@ -51,10 +51,13 @@ struct MessagesView: View {
         .sheet(isPresented: $showingNew) {
             NewMessageSheet { client in
                 showingNew = false
+                let local = store.ensureLocalThread(for: client)
+                store.markRead(local.id)
+                path.append(local)
                 Task {
                     let id = await store.threadID(for: client)
-                    if let convo = store.conversation(id: id) {
-                        try? await Task.sleep(for: .milliseconds(350))
+                    if id != local.id, let convo = store.conversation(id: id) {
+                        path = NavigationPath()
                         path.append(convo)
                     }
                 }
@@ -82,12 +85,19 @@ struct MessagesView: View {
         guard let clientID = app.pendingChatClientID,
               let client = clientStore.clients.first(where: { $0.id == clientID }) else { return }
         app.pendingChatClientID = nil
+
+        // Open immediately with a local/cached thread, then reconcile with the server.
+        let local = store.ensureLocalThread(for: client)
+        store.markRead(local.id)
+        path = NavigationPath()
+        path.append(local)
+
         Task {
             let id = await store.threadID(for: client)
-            guard let convo = store.conversation(id: id) else { return }
-            store.markRead(convo.id)
-            path = NavigationPath()
-            path.append(convo)
+            if id != local.id, let convo = store.conversation(id: id) {
+                path = NavigationPath()
+                path.append(convo)
+            }
         }
     }
 
@@ -151,9 +161,12 @@ struct MessagesView: View {
                 Image(systemName: "archivebox.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.Color.inkMuted)
-                Text("Archived conversations")
+                Text("Archived")
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(Theme.Color.inkMuted)
+                Text("\(store.archivedInbox().count)")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.Color.inkFaint)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .bold))
@@ -173,7 +186,7 @@ struct MessagesView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.Color.inkMuted)
             HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text("\(store.conversations.count)")
+                Text("\(store.activeConversationCount)")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                     .foregroundStyle(Theme.Color.ink)
                 Text("conversations")

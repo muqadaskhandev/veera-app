@@ -46,6 +46,8 @@ enum ChatNotificationRouter {
             return ("Image", "You have a new image from \(who)")
         case .video:
             return ("Video", "You have a new video from \(who)")
+        case .file:
+            return ("File", "You have a new file from \(who)")
         case .text:
             return ("New message", "You have a new message from \(who)")
         }

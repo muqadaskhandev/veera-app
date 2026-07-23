@@ -115,9 +115,8 @@ struct ClientsView: View {
                                 client: client,
                                 onProfile: { path.append(client) },
                                 onChat: {
-                                    // Switch tabs immediately; MessagesView resolves/creates the
-                                    // thread for `pendingChatClientID` in the background and pushes
-                                    // navigation once it's ready, so there's no network wait here.
+                                    // Switch tabs immediately. MessagesView opens a local
+                                    // thread right away, then reconciles with the server.
                                     app.openChat(with: client.id)
                                 },
                                 onArchive: {
