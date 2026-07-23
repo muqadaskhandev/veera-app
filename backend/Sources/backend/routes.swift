@@ -28,6 +28,7 @@ func routes(_ app: Application) throws {
     try app.register(collection: StorageController())
     try app.register(collection: NotificationWebhookController())
     try app.register(collection: CalendarController())
+    try app.register(collection: JoinLandingController())
 
     app.webSocket("ws", "chat") { req, ws in
         await ChatWebSocketHandler.handle(req: req, socket: ws)

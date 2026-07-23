@@ -172,26 +172,16 @@ struct ClientDashboardView: View {
 
     private func sessionBank(_ client: Client) -> some View {
         HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("SESSION BANK")
-                    .font(.system(size: 11, weight: .bold))
-                    .tracking(1.1)
-                    .foregroundStyle(Theme.Color.accent.opacity(0.8))
-                Text("Pre-paid sessions left")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(Theme.Color.inkFaint)
-            }
+            Text("SESSION BANK")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1.1)
+                .foregroundStyle(Theme.Color.accent.opacity(0.8))
             Spacer()
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("\(client.sessionsRemaining)")
-                    .font(.system(size: 46, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.Color.accent)
-                    .contentTransition(.numericText())
-                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: client.sessionsRemaining)
-                Text("left")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Theme.Color.background.opacity(0.7))
-            }
+            Text("\(client.sessionsRemaining)")
+                .font(.system(size: 46, weight: .bold, design: .rounded))
+                .foregroundStyle(Theme.Color.accent)
+                .contentTransition(.numericText())
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: client.sessionsRemaining)
         }
         .padding(Theme.Spacing.lg)
         .background(Theme.Color.ink, in: RoundedRectangle(cornerRadius: Theme.Radius.lg))

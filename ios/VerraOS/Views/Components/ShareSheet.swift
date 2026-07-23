@@ -24,11 +24,12 @@ struct InvitePayload: Identifiable {
 
 extension InvitePayload {
     /// Builds an invite link from a real, backend-issued join code.
+    /// Uses the API host so the smart `/join` page can open the app or App Store.
     init(clientName: String, code: String) {
-        self.init(
-            clientName: clientName,
-            url: URL(string: "https://verraos.app/join?code=\(code)")!
-        )
+        let encoded = code.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? code
+        let url = URL(string: "join?code=\(encoded)", relativeTo: APIConfig.baseURL)?.absoluteURL
+            ?? URL(string: "https://veera-app.onrender.com/join?code=\(encoded)")!
+        self.init(clientName: clientName, url: url)
     }
 }
 

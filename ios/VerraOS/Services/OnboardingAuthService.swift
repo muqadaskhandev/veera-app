@@ -45,6 +45,12 @@ enum OnboardingAuthService {
             currentName: preferredName,
             accessToken: auth.accessToken
         )
+
+        // Trainers see the subscription upsell once right after first signup.
+        if role == .trainer {
+            AuthStore.pendingPostSignupPaywall = true
+        }
+
         onComplete(displayName)
     }
 

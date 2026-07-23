@@ -8,6 +8,9 @@ enum AuthStore {
     private static let onboardedClientKey = "verra.onboarded.client"
     private static let clientDisplayNameKey = "verra.client.displayName"
     private static let clientGoalKey = "verra.client.goal"
+    /// Set after a trainer finishes first-time account creation so ContentView
+    /// can show the subscription upsell once (not on every later app launch).
+    private static let pendingPostSignupPaywallKey = "verra.pendingPostSignupPaywall"
 
     static var accessToken: String? {
         get { UserDefaults.standard.string(forKey: accessTokenKey) }
@@ -17,6 +20,11 @@ enum AuthStore {
     static var refreshToken: String? {
         get { UserDefaults.standard.string(forKey: refreshTokenKey) }
         set { UserDefaults.standard.set(newValue, forKey: refreshTokenKey) }
+    }
+
+    static var pendingPostSignupPaywall: Bool {
+        get { UserDefaults.standard.bool(forKey: pendingPostSignupPaywallKey) }
+        set { UserDefaults.standard.set(newValue, forKey: pendingPostSignupPaywallKey) }
     }
 
     static func save(accessToken: String, refreshToken: String) {
@@ -38,5 +46,6 @@ enum AuthStore {
         defaults.removeObject(forKey: onboardedClientKey)
         defaults.removeObject(forKey: clientDisplayNameKey)
         defaults.removeObject(forKey: clientGoalKey)
+        defaults.removeObject(forKey: pendingPostSignupPaywallKey)
     }
 }

@@ -63,6 +63,11 @@ struct VerraOSApp: App {
                 .onOpenURL { url in
                     DeepLinkRouter.shared.handle(url: url)
                 }
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    if let url = activity.webpageURL {
+                        DeepLinkRouter.shared.handle(url: url)
+                    }
+                }
         }
         .backgroundTask(.appRefresh(HealthBackgroundSync.taskIdentifier)) {
             _ = await HealthBackgroundSync.performBackgroundSync()

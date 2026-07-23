@@ -26,6 +26,8 @@ struct ContentView: View {
     @State private var showingHelp = false
     @State private var showLogOutConfirm = false
     @State private var incomingChatAlert: IncomingChatAlert?
+    /// One-time upsell after a trainer creates their account (not on every relaunch).
+    @State private var showingPostSignupPaywall = false
     @Environment(SubscriptionStore.self) private var subscription
     @Environment(\.scenePhase) private var scenePhase
 
@@ -81,6 +83,19 @@ struct ContentView: View {
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.86), value: incomingChatAlert?.title)
         .preferredColorScheme(.light)
+        .fullScreenCover(isPresented: $showingPostSignupPaywall) {
+            BillingView(isPaywall: true, onDismiss: {
+                AuthStore.pendingPostSignupPaywall = false
+                showingPostSignupPaywall = false
+            })
+            .environment(subscription)
+        }
+        .onChange(of: subscription.hasActiveSubscription) { _, isActive in
+            if isActive {
+                AuthStore.pendingPostSignupPaywall = false
+                showingPostSignupPaywall = false
+            }
+        }
         .background(Theme.Color.ink.ignoresSafeArea())
         .environment(app)
         .environment(schedule)
@@ -139,6 +154,7 @@ struct ContentView: View {
         }
         .task {
             await subscription.bootstrap()
+            await presentPostSignupPaywallIfNeeded()
             schedule.onCalendarPrefsPersisted = { json in
                 Task { await trainer.saveCalendarPrefsJSON(json) }
             }
@@ -270,6 +286,18 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             present()
         }
+    }
+
+    /// After first trainer signup only: verify subscription, then show upsell once.
+    @MainActor
+    private func presentPostSignupPaywallIfNeeded() async {
+        guard AuthStore.pendingPostSignupPaywall else { return }
+        await subscription.refreshFromServer()
+        if subscription.hasActiveSubscription || subscription.isAdmin {
+            AuthStore.pendingPostSignupPaywall = false
+            return
+        }
+        showingPostSignupPaywall = true
     }
 }
 

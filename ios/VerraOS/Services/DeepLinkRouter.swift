@@ -23,10 +23,13 @@ final class DeepLinkRouter {
     func handle(url: URL) {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return }
         let path = components.path
+        let host = components.host ?? ""
 
-        if path.hasPrefix("/join"), let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
-            setPendingCode(code)
-            return
+        if path.hasPrefix("/join") || host == "join" || path == "join" {
+            if let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
+                setPendingCode(code)
+                return
+            }
         }
 
         if path.hasPrefix("/invite/") {
@@ -36,7 +39,7 @@ final class DeepLinkRouter {
         }
 
         // Custom-scheme fallback, e.g. verraos://join?code=ABC123
-        if components.host == "join" || path.isEmpty, let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
+        if let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
             setPendingCode(code)
         }
     }

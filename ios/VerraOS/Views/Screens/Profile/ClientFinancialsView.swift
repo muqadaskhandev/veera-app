@@ -185,16 +185,11 @@ struct ClientFinancialsView: View {
                     .font(.system(size: 11, weight: .bold))
                     .tracking(1.1)
                     .foregroundStyle(Theme.Color.accent.opacity(0.8))
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("\(client.sessionsRemaining)")
-                        .font(.system(size: 60, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Color.accent)
-                        .contentTransition(.numericText())
-                        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: client.sessionsRemaining)
-                    Text("left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Theme.Color.background.opacity(0.7))
-                }
+                Text("\(client.sessionsRemaining)")
+                    .font(.system(size: 60, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.Color.accent)
+                    .contentTransition(.numericText())
+                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: client.sessionsRemaining)
             }
             if !isReadOnly {
                 HStack(spacing: 12) {

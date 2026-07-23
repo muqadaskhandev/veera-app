@@ -49,15 +49,6 @@ struct ScheduleView: View {
         clientStore.activeClients.reduce(0) { $0 + $1.sessionsRemaining }
     }
 
-    /// Live remaining sessions for the selected day: scheduled, not skipped,
-    /// not completed, and not yet elapsed — ordered by start time.
-    private var remainingToday: [Session] {
-        daySessions
-            .filter { !$0.isCompleted && !$0.isSkipped && $0.accent != .personal && !isImportedBusyBlock($0) }
-            .filter { !store.hasPassed($0) }
-            .sorted { $0.startMinutes < $1.startMinutes }
-    }
-
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
@@ -210,23 +201,6 @@ struct ScheduleView: View {
         }
     }
 
-    private var nextSessionSubtitle: String {
-        if let session = store.nextUpcomingSession {
-            return "Next: \(session.scheduleTimeLabel) · \(session.clientName)"
-        }
-        if !remainingToday.isEmpty {
-            return "Today: \(remainingToday.count) left"
-        }
-        return "Nothing scheduled"
-    }
-
-    private var nextSessionSubtitleIcon: String {
-        if store.nextUpcomingSession != nil || !remainingToday.isEmpty {
-            return "arrow.turn.down.right"
-        }
-        return "checkmark.circle"
-    }
-
     // MARK: Pacing header (2-card dashboard)
 
     private var pacingHeader: some View {
@@ -252,13 +226,6 @@ struct ScheduleView: View {
                     .foregroundStyle(Theme.Color.ink)
                     .contentTransition(.numericText())
                     .animation(.spring(response: 0.4, dampingFraction: 0.8), value: packageSessionsRemaining)
-                HStack(spacing: 5) {
-                    Image(systemName: nextSessionSubtitleIcon)
-                        .font(.system(size: 10, weight: .bold))
-                    Text(nextSessionSubtitle)
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .foregroundStyle(Theme.Color.inkMuted)
             }
             .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.lg))
             .overlay(

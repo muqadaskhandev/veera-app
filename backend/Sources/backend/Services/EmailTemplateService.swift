@@ -78,6 +78,7 @@ enum EmailTemplateService {
         let greeting = clientName.map { "Hi \($0)," } ?? "Hi there,"
         let expiryLine = expiresAt.map { "This invite expires on \(formatDate($0))." } ?? "This invite does not expire."
         let joinURL = "\(appURL)/join?code=\(code)"
+        let deepLink = "verraos://join?code=\(code)"
 
         let subject = "\(trainerName) invited you to Verra"
         let text = """
@@ -87,10 +88,12 @@ enum EmailTemplateService {
 
         Your invite code: \(code)
 
-        Download Verra, choose Client, and enter this code during signup.
-        \(expiryLine)
-
+        Open Verra (opens the app, or the App Store if you don't have it yet):
         \(joinURL)
+
+        Or open directly in the app: \(deepLink)
+
+        \(expiryLine)
         """
         let html = layout(
             preview: "\(trainerName) invited you to Verra",
@@ -99,7 +102,7 @@ enum EmailTemplateService {
             body: """
             \(paragraph("\(greeting) <strong>\(escape(trainerName))</strong> invited you to join them on Verra — your coach's operating system for training, progress, and accountability."))
             \(infoCard(label: "Your invite code", value: code, highlight: true))
-            \(paragraph("Download Verra, tap <strong>Client</strong>, and enter your invite code during signup."))
+            \(paragraph("Tap <strong>Open Verra</strong> to open the app. If Verra isn't installed yet, you'll be taken to the App Store."))
             \(button("Open Verra", url: joinURL))
             \(muted(expiryLine))
             """
