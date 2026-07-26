@@ -14,6 +14,7 @@ enum ConversationService {
             }
             let rows = try await Conversation.query(on: database)
                 .filter(\.$trainer.$id == trainer.id!)
+                .filter(\.$trainerIsDeleted == false)
                 .sort(\.$lastMessageAt, .descending)
                 .sort(\.$lastActiveAt, .descending)
                 .all()
@@ -31,6 +32,7 @@ enum ConversationService {
             }
             let rows = try await Conversation.query(on: database)
                 .filter(\.$client.$id == client.id!)
+                .filter(\.$clientIsDeleted == false)
                 .sort(\.$lastMessageAt, .descending)
                 .all()
             var result: [ConversationDTO] = []
@@ -41,6 +43,7 @@ enum ConversationService {
 
         case .admin:
             let rows = try await Conversation.query(on: database)
+                .filter(\.$trainerIsDeleted == false)
                 .sort(\.$lastMessageAt, .descending)
                 .all()
             var result: [ConversationDTO] = []
@@ -60,12 +63,14 @@ enum ConversationService {
             throw Abort(.notFound, reason: "Client not found")
         }
 
+        let viewerRole: UserRole = trainerUser.userRole == .admin ? .admin : .trainer
+
         if trainerUser.userRole == .admin {
             if let existing = try await Conversation.query(on: database)
                 .filter(\.$trainer.$id == client.$trainer.id)
                 .filter(\.$client.$id == clientID)
                 .first() {
-                return existing
+                return try await restoreIfHidden(existing, for: viewerRole, on: database)
             }
 
             let conversation = Conversation(
@@ -82,7 +87,7 @@ enum ConversationService {
                     .filter(\.$trainer.$id == client.$trainer.id)
                     .filter(\.$client.$id == clientID)
                     .first() {
-                    return existing
+                    return try await restoreIfHidden(existing, for: viewerRole, on: database)
                 }
                 throw error
             }
@@ -102,7 +107,7 @@ enum ConversationService {
             .filter(\.$trainer.$id == client.$trainer.id)
             .filter(\.$client.$id == clientID)
             .first() {
-            return existing
+            return try await restoreIfHidden(existing, for: .trainer, on: database)
         }
 
         let conversation = Conversation(
@@ -122,10 +127,13 @@ enum ConversationService {
                 .filter(\.$trainer.$id == client.$trainer.id)
                 .filter(\.$client.$id == clientID)
                 .first() {
-                return existing
+                return try await restoreIfHidden(existing, for: .trainer, on: database)
             }
             throw error
         }
+    }
+
+    static func getOrCreateForCurrentClient(user: User, on database: any Database) async throws -> Conversation {
         guard user.userRole == .client else {
             throw Abort(.forbidden)
         }
@@ -139,7 +147,7 @@ enum ConversationService {
         if let existing = try await Conversation.query(on: database)
             .filter(\.$client.$id == client.id!)
             .first() {
-            return existing
+            return try await restoreIfHidden(existing, for: .client, on: database)
         }
 
         let conversation = Conversation(
@@ -155,10 +163,36 @@ enum ConversationService {
             if let existing = try await Conversation.query(on: database)
                 .filter(\.$client.$id == client.id!)
                 .first() {
-                return existing
+                return try await restoreIfHidden(existing, for: .client, on: database)
             }
             throw error
         }
+    }
+
+    static func setArchived(
+        conversationID: UUID,
+        archived: Bool,
+        for user: User,
+        on database: any Database
+    ) async throws -> ConversationDTO {
+        let conversation = try await requireConversation(conversationID, for: user, on: database)
+        let role = user.userRole ?? .client
+        conversation.setDeleted(false, for: role)
+        conversation.setArchived(archived, for: role)
+        try await conversation.save(on: database)
+        return try await ConversationDTO.make(from: conversation, viewer: user, on: database)
+    }
+
+    /// Soft-deletes the thread for this viewer only — history stays for the other participant.
+    static func softDelete(
+        conversationID: UUID,
+        for user: User,
+        on database: any Database
+    ) async throws {
+        let conversation = try await requireConversation(conversationID, for: user, on: database)
+        let role = user.userRole ?? .client
+        conversation.setDeleted(true, for: role)
+        try await conversation.save(on: database)
     }
 
     static func requireConversation(_ id: UUID, for user: User, on database: any Database) async throws -> Conversation {
@@ -265,10 +299,14 @@ enum ConversationService {
         conversation.lastMessageAt = message.createdAt ?? .now
         conversation.lastActiveAt = .now
 
+        // Sending restores the thread for the sender and surfaces it again for the recipient.
+        conversation.restoreVisibility(for: role == .client ? .client : .trainer)
         if role == .trainer {
             conversation.clientIsUnread = true
+            conversation.restoreVisibility(for: .client)
         } else {
             conversation.isUnread = true
+            conversation.restoreVisibility(for: .trainer)
         }
         try await conversation.save(on: database)
 
@@ -420,6 +458,20 @@ enum ConversationService {
             sent.append(dto)
         }
         return sent
+    }
+
+    private static func restoreIfHidden(
+        _ conversation: Conversation,
+        for role: UserRole,
+        on database: any Database
+    ) async throws -> Conversation {
+        let viewerRole: UserRole = role == .client ? .client : .trainer
+        guard conversation.isArchived(for: viewerRole) || conversation.isDeleted(for: viewerRole) else {
+            return conversation
+        }
+        conversation.restoreVisibility(for: viewerRole)
+        try await conversation.save(on: database)
+        return conversation
     }
 
     private static func assertAccess(_ conversation: Conversation, user: User, on database: any Database) async throws {

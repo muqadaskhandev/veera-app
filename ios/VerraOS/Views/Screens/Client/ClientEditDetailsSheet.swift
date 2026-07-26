@@ -15,7 +15,6 @@ struct ClientEditDetailsSheet: View {
     @State private var draftName: String
     @State private var age: String
     @State private var heightFeet: String
-    @State private var heightInches: String
     @State private var startWeight: String
     @State private var goalWeight: String
     @State private var pickerItem: PhotosPickerItem?
@@ -25,7 +24,7 @@ struct ClientEditDetailsSheet: View {
     @State private var didPopulateWeights = false
 
     private enum Field: Hashable {
-        case name, age, heightFeet, heightInches, startWeight, goalWeight
+        case name, age, heightFeet, startWeight, goalWeight
     }
     @FocusState private var focusedField: Field?
 
@@ -39,12 +38,12 @@ struct ClientEditDetailsSheet: View {
         let client = account.client
         _age = State(initialValue: client?.age.map { "\($0)" } ?? "")
         if let cm = client?.heightCm {
-            let totalInches = Int((Double(cm) / 2.54).rounded())
-            _heightFeet = State(initialValue: "\(totalInches / 12)")
-            _heightInches = State(initialValue: "\(totalInches % 12)")
+            let feet = Client.feetDecimal(fromCm: cm)
+            _heightFeet = State(initialValue: feet == feet.rounded()
+                ? String(format: "%.0f", feet)
+                : String(format: "%.1f", feet))
         } else {
             _heightFeet = State(initialValue: "")
-            _heightInches = State(initialValue: "")
         }
         // Weight fields depend on the trainer's preferred unit, which isn't
         // available from the environment yet inside `init` — populated in
@@ -121,19 +120,39 @@ struct ClientEditDetailsSheet: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             sectionLabel("Your Details")
             field(label: "Age", text: $age, placeholder: "—", keyboard: .numberPad)
+                .numbersOnly($age)
             heightField
             weightField(label: "Start weight", text: $startWeight, field: .startWeight)
+                .numbersOnly($startWeight, allowDecimal: true)
             weightField(label: "Goal weight", text: $goalWeight, field: .goalWeight)
+                .numbersOnly($goalWeight, allowDecimal: true)
         }
     }
 
     private var heightField: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("Height")
-            HStack(spacing: Theme.Spacing.sm) {
-                unitBox(text: $heightFeet, unit: "ft", field: .heightFeet)
-                unitBox(text: $heightInches, unit: "in", field: .heightInches)
+            HStack {
+                TextField("", text: $heightFeet, prompt: Text("5.6").foregroundStyle(Theme.Color.inkFaint))
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.Color.ink)
+                    .tint(Theme.Color.ink)
+                    .keyboardType(.decimalPad)
+                    .focused($focusedField, equals: .heightFeet)
+                    .numbersOnly($heightFeet, allowDecimal: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                Text("ft")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.Color.inkFaint)
             }
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity)
+            .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+            .contentShape(Rectangle())
+            .onTapGesture { focusedField = .heightFeet }
         }
     }
 
@@ -161,29 +180,6 @@ struct ClientEditDetailsSheet: View {
             .contentShape(Rectangle())
             .onTapGesture { focusedField = field }
         }
-    }
-
-    private func unitBox(text: Binding<String>, unit: String, field: Field) -> some View {
-        HStack {
-            TextField("", text: text, prompt: Text("—").foregroundStyle(Theme.Color.inkFaint))
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.Color.ink)
-                .tint(Theme.Color.ink)
-                .keyboardType(.numberPad)
-                .focused($focusedField, equals: field)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            Text(unit)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.Color.inkFaint)
-        }
-        .padding(.horizontal, Theme.Spacing.md)
-        .padding(.vertical, 13)
-        .frame(maxWidth: .infinity)
-        .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
-        .contentShape(Rectangle())
-        .onTapGesture { focusedField = field }
     }
 
     private var photoSection: some View {
@@ -263,11 +259,8 @@ struct ClientEditDetailsSheet: View {
         }
 
         let parsedAge = Int(age.trimmingCharacters(in: .whitespaces))
-        let feet = Int(heightFeet.trimmingCharacters(in: .whitespaces))
-        let inches = Int(heightInches.trimmingCharacters(in: .whitespaces))
-        let heightCm: Int? = (feet != nil || inches != nil)
-            ? Client.cm(fromFeet: feet ?? 0, inches: inches ?? 0)
-            : nil
+        let feet = Double(heightFeet.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "."))
+        let heightCm: Int? = (feet != nil && feet! > 0) ? Client.cm(fromDecimalFeet: feet!) : nil
         let startKg = parse(startWeight).map { Int(unit.toKg($0).rounded()) }
         let goalKg = parse(goalWeight).map { Int(unit.toKg($0).rounded()) }
 

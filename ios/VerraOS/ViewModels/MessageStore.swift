@@ -18,23 +18,11 @@ final class MessageStore {
     /// Bumped on local unread changes so an in-flight poll can't wipe a newer WS update.
     private var inboxEpoch = 0
 
-    /// Locally-persisted archive/delete state — the backend has no concept of
-    /// either yet, so these live in UserDefaults keyed by conversation ID.
-    private static let archivedDefaultsKey = "com.verraos.archivedConversationIDs"
-    private static let deletedDefaultsKey = "com.verraos.deletedConversationIDs"
-    private var archivedIDs: Set<UUID>
-    private var deletedIDs: Set<UUID>
-
     init(conversations: [Conversation] = []) {
-        let archived = Self.loadIDSet(key: Self.archivedDefaultsKey)
-        let deleted = Self.loadIDSet(key: Self.deletedDefaultsKey)
-        self.archivedIDs = archived
-        self.deletedIDs = deleted
-        self.conversations = conversations.map { convo in
-            var convo = convo
-            convo.isArchived = archived.contains(convo.id)
-            return convo
-        }
+        self.conversations = conversations
+        // Legacy local-only archive/delete keys — server is now source of truth.
+        UserDefaults.standard.removeObject(forKey: "com.verraos.archivedConversationIDs")
+        UserDefaults.standard.removeObject(forKey: "com.verraos.deletedConversationIDs")
     }
 
     /// Total unread messages across the inbox (local tallies; server only stores a boolean flag).
@@ -102,46 +90,39 @@ final class MessageStore {
 
     @MainActor
     func archive(_ id: UUID) {
-        archivedIDs.insert(id)
-        persist(archivedIDs, key: Self.archivedDefaultsKey)
         if let index = conversations.firstIndex(where: { $0.id == id }) {
             conversations[index].isArchived = true
         }
+        Task { await persistArchive(true, for: id) }
     }
 
     @MainActor
     func unarchive(_ id: UUID) {
-        archivedIDs.remove(id)
-        persist(archivedIDs, key: Self.archivedDefaultsKey)
         if let index = conversations.firstIndex(where: { $0.id == id }) {
             conversations[index].isArchived = false
         }
+        Task { await persistArchive(false, for: id) }
     }
 
     @MainActor
     func delete(_ id: UUID) {
-        deletedIDs.insert(id)
-        archivedIDs.remove(id)
-        persist(deletedIDs, key: Self.deletedDefaultsKey)
-        persist(archivedIDs, key: Self.archivedDefaultsKey)
         conversations.removeAll { $0.id == id }
+        Task {
+            guard let token = AuthStore.accessToken else { return }
+            try? await VerraAPI.deleteConversation(conversationID: id, accessToken: token)
+        }
     }
 
-    private static func loadIDSet(key: String) -> Set<UUID> {
-        let raw = UserDefaults.standard.stringArray(forKey: key) ?? []
-        return Set(raw.compactMap(UUID.init(uuidString:)))
-    }
-
-    private func persist(_ ids: Set<UUID>, key: String) {
-        UserDefaults.standard.set(ids.map(\.uuidString), forKey: key)
-    }
-
-    /// Clears a previously-deleted flag when the trainer actively re-engages
-    /// with a thread (opens it or sends a message), so it isn't silently
-    /// dropped again on the next server refresh.
-    private func undeleteIfNeeded(_ id: UUID) {
-        guard deletedIDs.remove(id) != nil else { return }
-        persist(deletedIDs, key: Self.deletedDefaultsKey)
+    @MainActor
+    private func persistArchive(_ archived: Bool, for id: UUID) async {
+        guard let token = AuthStore.accessToken else { return }
+        if let dto = try? await VerraAPI.setConversationArchived(
+            conversationID: id,
+            archived: archived,
+            accessToken: token
+        ), let index = conversations.firstIndex(where: { $0.id == id }) {
+            conversations[index].isArchived = dto.isArchived ?? archived
+        }
     }
 
     // MARK: Server sync
@@ -179,7 +160,6 @@ final class MessageStore {
 
             var merged: [Conversation] = []
             for dto in dtos {
-                guard !deletedIDs.contains(dto.id) else { continue }
                 if let existing = conversations.first(where: { $0.id == dto.id }) {
                     // Server only has a boolean; keep the local tally while still unread.
                     let unreadCount: Int
@@ -198,13 +178,14 @@ final class MessageStore {
                         convo.otherParticipantIsOnline = true
                         convo.otherParticipantLastSeen = nil
                     }
-                    convo.isArchived = archivedIDs.contains(dto.id)
                     merged.append(convo)
                 } else {
-                    var convo = MessageLoader.conversation(from: dto)
-                    convo.isArchived = archivedIDs.contains(dto.id)
-                    merged.append(convo)
+                    merged.append(MessageLoader.conversation(from: dto))
                 }
+            }
+            // Keep optimistic local placeholders that haven't been adopted yet.
+            for local in conversations where !merged.contains(where: { $0.id == local.id || $0.clientID == local.clientID }) {
+                merged.append(local)
             }
             // One thread per client — drop duplicate rows (e.g. from races before
             // the unique index) and migrate any local placeholder messages.
@@ -263,7 +244,6 @@ final class MessageStore {
     @discardableResult
     private func adoptServerConversation(_ server: Conversation, for clientID: UUID) -> UUID {
         var adopted = server
-        adopted.isArchived = archivedIDs.contains(server.id)
 
         let placeholders = conversations.filter { $0.clientID == clientID && $0.id != server.id }
         let migrated = placeholders.flatMap(\.messages)
@@ -306,8 +286,11 @@ final class MessageStore {
                 messages.append(message)
             }
             keep.messages = messages.sorted { $0.sentAt < $1.sentAt }
-            if existing.isArchived || convo.isArchived {
-                keep.isArchived = archivedIDs.contains(keep.id)
+            // Prefer the archive flag from the row we keep (server snapshot).
+            if keep.id == convo.id {
+                keep.isArchived = convo.isArchived
+            } else {
+                keep.isArchived = existing.isArchived
             }
             byClient[convo.clientID] = keep
         }
@@ -343,8 +326,6 @@ final class MessageStore {
 
     @MainActor
     func send(_ kind: MessageKind, to id: UUID, attachmentURL: String? = nil) async {
-        undeleteIfNeeded(id)
-
         // Show the bubble immediately — waiting on the network made sends feel laggy.
         let optimisticID = UUID()
         let optimistic = Message(
@@ -357,6 +338,9 @@ final class MessageStore {
         )
         append(optimistic, to: id)
         updatePreview(for: id, preview: kind.preview, at: .now)
+        if let index = conversations.firstIndex(where: { $0.id == id }) {
+            conversations[index].isArchived = false
+        }
 
         guard let token = AuthStore.accessToken else {
             ChatOfflineQueue.enqueue(
@@ -408,6 +392,9 @@ final class MessageStore {
             )
             append(optimistic, to: conversationID)
             updatePreview(for: conversationID, preview: upload.kind.preview, at: .now)
+            if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+                conversations[index].isArchived = false
+            }
 
             do {
                 let dto = try await VerraAPI.sendMessage(

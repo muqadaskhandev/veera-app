@@ -39,6 +39,7 @@ struct ChatThreadView: View {
     @State private var cameraMode: CameraPicker.Mode = .photo
     @State private var isUploadingMedia = false
     @State private var showingFileImporter = false
+    @State private var showingGIFPicker = false
 
     private var conversation: Conversation? { store.conversation(id: conversationID) }
     private var client: Client? {
@@ -85,6 +86,12 @@ struct ChatThreadView: View {
                 Task { await handleCameraCapture(capture) }
             }
             .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showingGIFPicker) {
+            ChatGIFPickerView { gif in
+                Task { await handleGIFSelection(gif) }
+            }
+            .presentationDetents([.medium, .large])
         }
     }
 
@@ -263,6 +270,22 @@ struct ChatThreadView: View {
                     galleryItem = nil
                     Task { await handleGallerySelection(item) }
                 }
+
+                Button {
+                    showingGIFPicker = true
+                } label: {
+                    Text("GIF")
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundStyle(Theme.Color.inkMuted)
+                        .frame(width: 36, height: 28)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Theme.Color.inkMuted.opacity(0.55), lineWidth: 1.5)
+                        )
+                        .frame(width: 40, height: 40)
+                }
+                .buttonStyle(.plain)
+                .disabled(isUploadingMedia || voiceRecorder.isRecording)
 
                 Button {
                     showingFileImporter = true
@@ -506,6 +529,28 @@ struct ChatThreadView: View {
             return
         }
         await sendPreparedUpload(upload, successMessage: isGIF ? "GIF sent" : "Photo sent", icon: "photo.fill")
+    }
+
+    @MainActor
+    private func handleGIFSelection(_ gif: VerraAPI.GifDTO) async {
+        isUploadingMedia = true
+        defer { isUploadingMedia = false }
+
+        guard let url = URL(string: gif.url) else {
+            toast = ToastData(message: "Couldn't load that GIF", icon: "exclamationmark.triangle.fill")
+            return
+        }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let upload = ChatMediaService.prepareGIF(from: data) else {
+                toast = ToastData(message: "Couldn't process that GIF", icon: "exclamationmark.triangle.fill")
+                return
+            }
+            await sendPreparedUpload(upload, successMessage: "GIF sent", icon: "photo.fill")
+        } catch {
+            toast = ToastData(message: "Couldn't download that GIF", icon: "exclamationmark.triangle.fill")
+        }
     }
 
     @MainActor

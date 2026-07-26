@@ -297,16 +297,23 @@ struct WorkoutPlanView: View {
         HStack(spacing: 7) {
             ForEach(Array(week.enumerated()), id: \.offset) { index, day in
                 let isSelected = index == selectedDayIndex
+                let exerciseCount = day.exercises.filter { $0.kind == .exercise }.count
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { selectedDayIndex = index }
                 } label: {
-                    VStack(spacing: 6) {
+                    VStack(spacing: 5) {
                         Text(day.label)
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(isSelected ? Theme.Color.accentInk : Theme.Color.inkMuted)
-                        Circle()
-                            .fill(day.isRest ? Theme.Color.inkFaint.opacity(0.5) : (isSelected ? Theme.Color.accentInk : Theme.Color.accent))
-                            .frame(width: 7, height: 7)
+                        if exerciseCount > 0 {
+                            Text("\(exerciseCount)")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .foregroundStyle(isSelected ? Theme.Color.accentInk : Theme.Color.ink)
+                        } else {
+                            Circle()
+                                .fill(Theme.Color.inkFaint.opacity(0.45))
+                                .frame(width: 7, height: 7)
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 11)
@@ -707,7 +714,10 @@ struct WorkoutPlanView: View {
 
     private func saveSessionNotes() {
         let trimmed = sessionNotes.trimmingCharacters(in: .whitespacesAndNewlines)
-        mutateSelectedDay { day in day.notes = trimmed }
+        mutateSelectedDay { day in day.notes = trimmed.isEmpty ? nil : trimmed }
+        sessionNotes = trimmed
+        sessionNotesKey = dayKey
+        Task { await profile.flushWorkoutPersist(clientID: client.id, week: weekIndex) }
         toast = ToastData(message: "Session logged", icon: "checkmark.circle.fill")
     }
 
@@ -867,17 +877,27 @@ struct WorkoutPlanView: View {
     }
 
     private var saveFreestyleButton: some View {
-        Button(action: saveFreestyleWorkout) {
-            HStack(spacing: 7) {
-                Image(systemName: "checkmark.circle.fill").font(.system(size: 15, weight: .bold))
-                Text("Save Freestyle Workout").font(.system(size: 15, weight: .bold))
+        VStack(spacing: 8) {
+            Button {
+                saveFreestyleWorkout()
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 15, weight: .bold))
+                    Text("Save Freestyle Workout").font(.system(size: 15, weight: .bold))
+                }
+                .foregroundStyle(Theme.Color.accentInk)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Theme.Color.accent, in: Capsule())
             }
-            .foregroundStyle(Theme.Color.accentInk)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 13)
-            .background(Theme.Color.accent, in: Capsule())
+            .buttonStyle(.plain)
+            .accessibilityLabel("Save Freestyle Workout")
+
+            Text("Saves logged exercises and session notes to this day.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.Color.inkFaint)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
-        .buttonStyle(.plain)
     }
 
     private static func weightLabel(_ kg: Double) -> String {
@@ -950,6 +970,7 @@ struct WorkoutPlanView: View {
         freestyleSetsText = ""
         freestyleRepsText = ""
         freestyleWeightText = ""
+        Task { await profile.flushWorkoutPersist(clientID: client.id, week: weekIndex) }
         toast = ToastData(message: "Added \(trimmed)", icon: "checkmark.circle.fill")
     }
 
@@ -958,9 +979,12 @@ struct WorkoutPlanView: View {
             addFreestyleExercise()
         }
         mutateSelectedDay { day in
-            day.notes = sessionNotes.trimmingCharacters(in: .whitespacesAndNewlines)
-            if day.focus == nil || day.focus?.isEmpty == true { day.focus = focus.rawValue }
+            let trimmedNotes = sessionNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+            day.notes = trimmedNotes.isEmpty ? nil : trimmedNotes
+            day.focus = focus.rawValue
         }
+        sessionNotesKey = dayKey
+        Task { await profile.flushWorkoutPersist(clientID: client.id, week: weekIndex) }
         toast = ToastData(message: "Freestyle workout saved", icon: "checkmark.circle.fill")
     }
 
@@ -987,7 +1011,9 @@ struct WorkoutPlanView: View {
                 arr.append(item)
             }
             day.exercises = arr
-            if day.focus == nil { day.focus = "Workout" }
+            if day.focus == nil || day.focus?.isEmpty == true {
+                day.focus = mode == .freestyle ? focus.rawValue : "Workout"
+            }
         }
     }
 

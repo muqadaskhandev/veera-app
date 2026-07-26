@@ -159,12 +159,23 @@ struct Client: Identifiable, Hashable {
 }
 
 extension Client {
-    /// Formats a centimeter height as US feet-and-inches notation, e.g. 5'9".
+    /// Formats a centimeter height as decimal feet, e.g. `5.6 ft` (not `5'7"`).
     static func formatHeightImperial(cm: Int) -> String {
-        let totalInches = Int((Double(cm) / 2.54).rounded())
-        let feet = totalInches / 12
-        let inches = totalInches % 12
-        return "\(feet)'\(inches)\""
+        let feet = feetDecimal(fromCm: cm)
+        if feet == feet.rounded() {
+            return String(format: "%.0f ft", feet)
+        }
+        return String(format: "%.1f ft", feet)
+    }
+
+    /// Decimal feet value for editors (one decimal place).
+    static func feetDecimal(fromCm cm: Int) -> Double {
+        (Double(cm) / 30.48 * 10).rounded() / 10
+    }
+
+    /// Converts decimal feet (e.g. 5.6) into centimeters for storage.
+    static func cm(fromDecimalFeet feet: Double) -> Int {
+        Int((feet * 30.48).rounded())
     }
 
     /// Converts feet + inches into centimeters for storage.

@@ -95,7 +95,7 @@ struct Conversation: Identifiable, Hashable {
     var otherParticipantIsOnline: Bool
     var otherParticipantLastSeen: Date?
     var otherParticipantAvatarURL: String?
-    /// Locally-persisted archive flag (no backend support yet).
+    /// Per-viewer archive flag from the server (local optimistic updates allowed).
     var isArchived: Bool = false
 
     /// Presence label for the chat header.
@@ -140,7 +140,8 @@ struct Conversation: Identifiable, Hashable {
         otherParticipantUserID: UUID? = nil,
         otherParticipantIsOnline: Bool = false,
         otherParticipantLastSeen: Date? = nil,
-        otherParticipantAvatarURL: String? = nil
+        otherParticipantAvatarURL: String? = nil,
+        isArchived: Bool = false
     ) {
         self.id = id
         self.clientID = clientID
@@ -156,6 +157,7 @@ struct Conversation: Identifiable, Hashable {
         self.otherParticipantIsOnline = otherParticipantIsOnline
         self.otherParticipantLastSeen = otherParticipantLastSeen
         self.otherParticipantAvatarURL = otherParticipantAvatarURL
+        self.isArchived = isArchived
     }
 }
 

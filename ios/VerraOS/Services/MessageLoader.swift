@@ -7,6 +7,7 @@ struct ConversationDTO: Codable {
     let clientName: String
     let initials: String
     let isUnread: Bool
+    let isArchived: Bool?
     let lastActiveAt: Date
     let lastMessagePreview: String?
     let lastMessageAt: Date?
@@ -84,7 +85,8 @@ enum MessageLoader {
             otherParticipantUserID: dto.otherParticipantUserID,
             otherParticipantIsOnline: dto.otherParticipantIsOnline,
             otherParticipantLastSeen: dto.otherParticipantLastSeen,
-            otherParticipantAvatarURL: dto.otherParticipantAvatarURL
+            otherParticipantAvatarURL: dto.otherParticipantAvatarURL,
+            isArchived: dto.isArchived ?? false
         )
     }
 

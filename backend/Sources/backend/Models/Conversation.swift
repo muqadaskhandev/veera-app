@@ -34,6 +34,19 @@ final class Conversation: Model, @unchecked Sendable {
     @OptionalField(key: "last_message_at")
     var lastMessageAt: Date?
 
+    /// Per-viewer inbox flags — archive/delete do not affect the other participant.
+    @Field(key: "trainer_is_archived")
+    var trainerIsArchived: Bool
+
+    @Field(key: "client_is_archived")
+    var clientIsArchived: Bool
+
+    @Field(key: "trainer_is_deleted")
+    var trainerIsDeleted: Bool
+
+    @Field(key: "client_is_deleted")
+    var clientIsDeleted: Bool
+
     @Timestamp(key: "created_at", on: .create)
     var createdAt: Date?
 
@@ -53,7 +66,11 @@ final class Conversation: Model, @unchecked Sendable {
         initials: String,
         isUnread: Bool = false,
         clientIsUnread: Bool = false,
-        lastActiveAt: Date = .now
+        lastActiveAt: Date = .now,
+        trainerIsArchived: Bool = false,
+        clientIsArchived: Bool = false,
+        trainerIsDeleted: Bool = false,
+        clientIsDeleted: Bool = false
     ) {
         self.id = id
         self.$trainer.id = trainerID
@@ -63,6 +80,42 @@ final class Conversation: Model, @unchecked Sendable {
         self.isUnread = isUnread
         self.clientIsUnread = clientIsUnread
         self.lastActiveAt = lastActiveAt
+        self.trainerIsArchived = trainerIsArchived
+        self.clientIsArchived = clientIsArchived
+        self.trainerIsDeleted = trainerIsDeleted
+        self.clientIsDeleted = clientIsDeleted
+    }
+
+    func isArchived(for role: UserRole) -> Bool {
+        role == .client ? clientIsArchived : trainerIsArchived
+    }
+
+    func isDeleted(for role: UserRole) -> Bool {
+        role == .client ? clientIsDeleted : trainerIsDeleted
+    }
+
+    func setArchived(_ archived: Bool, for role: UserRole) {
+        if role == .client {
+            clientIsArchived = archived
+        } else {
+            trainerIsArchived = archived
+        }
+    }
+
+    func setDeleted(_ deleted: Bool, for role: UserRole) {
+        if role == .client {
+            clientIsDeleted = deleted
+            if deleted { clientIsArchived = false }
+        } else {
+            trainerIsDeleted = deleted
+            if deleted { trainerIsArchived = false }
+        }
+    }
+
+    /// Clears hide flags when the viewer re-opens or sends in the thread.
+    func restoreVisibility(for role: UserRole) {
+        setDeleted(false, for: role)
+        setArchived(false, for: role)
     }
 }
 
@@ -75,6 +128,7 @@ struct ConversationDTO: Content {
     let clientName: String
     let initials: String
     let isUnread: Bool
+    let isArchived: Bool
     let lastActiveAt: Date
     let lastMessagePreview: String?
     let lastMessageAt: Date?
@@ -90,6 +144,7 @@ struct ConversationDTO: Content {
         clientName: String,
         initials: String,
         isUnread: Bool,
+        isArchived: Bool = false,
         lastActiveAt: Date,
         lastMessagePreview: String?,
         lastMessageAt: Date?,
@@ -104,6 +159,7 @@ struct ConversationDTO: Content {
         self.clientName = clientName
         self.initials = initials
         self.isUnread = isUnread
+        self.isArchived = isArchived
         self.lastActiveAt = lastActiveAt
         self.lastMessagePreview = lastMessagePreview
         self.lastMessageAt = lastMessageAt
@@ -124,6 +180,7 @@ struct ConversationDTO: Content {
             clientName: conversation.clientName,
             initials: conversation.initials,
             isUnread: viewerRole == .client ? conversation.clientIsUnread : conversation.isUnread,
+            isArchived: conversation.isArchived(for: viewerRole),
             lastActiveAt: conversation.lastActiveAt,
             lastMessagePreview: conversation.lastMessagePreview,
             lastMessageAt: conversation.lastMessageAt
@@ -154,6 +211,7 @@ struct ConversationDTO: Content {
             clientName: dto.clientName,
             initials: dto.initials,
             isUnread: dto.isUnread,
+            isArchived: dto.isArchived,
             lastActiveAt: dto.lastActiveAt,
             lastMessagePreview: dto.lastMessagePreview,
             lastMessageAt: dto.lastMessageAt,
@@ -164,6 +222,10 @@ struct ConversationDTO: Content {
         )
         return dto
     }
+}
+
+struct UpdateConversationArchiveRequest: Content {
+    let archived: Bool
 }
 
 struct ConversationDetailResponse: Content {

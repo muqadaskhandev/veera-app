@@ -689,6 +689,61 @@ enum VerraAPI {
         )
     }
 
+    struct ArchiveConversationBody: Encodable {
+        let archived: Bool
+    }
+
+    static func setConversationArchived(
+        conversationID: UUID,
+        archived: Bool,
+        accessToken: String
+    ) async throws -> ConversationDTO {
+        try await APIClient.shared.request(
+            "/api/conversations/\(conversationID.uuidString)/archive",
+            method: "PATCH",
+            body: ArchiveConversationBody(archived: archived),
+            token: accessToken
+        )
+    }
+
+    static func deleteConversation(conversationID: UUID, accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/conversations/\(conversationID.uuidString)",
+            method: "DELETE",
+            token: accessToken
+        )
+    }
+
+    struct GifDTO: Codable, Identifiable {
+        let id: String
+        let title: String
+        let url: String
+        let previewURL: String
+        let width: Int?
+        let height: Int?
+    }
+
+    struct GifListResponse: Codable {
+        let gifs: [GifDTO]
+    }
+
+    static func fetchTrendingGifs(limit: Int = 24, accessToken: String) async throws -> [GifDTO] {
+        let response: GifListResponse = try await APIClient.shared.request(
+            "/api/gifs/trending?limit=\(limit)",
+            token: accessToken
+        )
+        return response.gifs
+    }
+
+    static func searchGifs(query: String, limit: Int = 24, accessToken: String) async throws -> [GifDTO] {
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        let response: GifListResponse = try await APIClient.shared.request(
+            "/api/gifs/search?q=\(encoded)&limit=\(limit)",
+            token: accessToken
+        )
+        return response.gifs
+    }
+
     struct UpdateClientBody: Encodable {
         let age: Int?
         let heightCm: Int?

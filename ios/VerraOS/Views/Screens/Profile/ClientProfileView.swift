@@ -379,12 +379,11 @@ private struct EditBiometricsSheet: View {
 
     @State private var age: String = ""
     @State private var heightFeet: String = ""
-    @State private var heightInches: String = ""
     @State private var startWeight: String = ""
     @State private var goalWeight: String = ""
 
     private enum Field: Hashable {
-        case age, heightFeet, heightInches, startWeight, goalWeight
+        case age, heightFeet, startWeight, goalWeight
     }
     @FocusState private var focusedField: Field?
 
@@ -396,9 +395,13 @@ private struct EditBiometricsSheet: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: Theme.Spacing.md) {
                     field(label: "Age", unit: "yrs", text: $age, field: .age)
-                    heightField
+                        .numbersOnly($age)
+                    field(label: "Height", unit: "ft", text: $heightFeet, field: .heightFeet, keyboard: .decimalPad)
+                        .numbersOnly($heightFeet, allowDecimal: true)
                     field(label: "Start Weight", unit: unit.short, text: $startWeight, field: .startWeight, keyboard: .decimalPad)
+                        .numbersOnly($startWeight, allowDecimal: true)
                     field(label: "Goal Weight", unit: unit.short, text: $goalWeight, field: .goalWeight, keyboard: .decimalPad)
+                        .numbersOnly($goalWeight, allowDecimal: true)
                 }
                 .padding(Theme.Spacing.md)
             }
@@ -420,42 +423,6 @@ private struct EditBiometricsSheet: View {
             }
         }
         .onAppear { populate() }
-    }
-
-    private var heightField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("HEIGHT")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(0.9)
-                .foregroundStyle(Theme.Color.inkFaint)
-            HStack(spacing: Theme.Spacing.sm) {
-                unitBox(text: $heightFeet, unit: "ft", field: .heightFeet)
-                unitBox(text: $heightInches, unit: "in", field: .heightInches)
-            }
-        }
-    }
-
-    private func unitBox(text: Binding<String>, unit: String, field: Field) -> some View {
-        HStack {
-            TextField("", text: text, prompt: Text("—").foregroundStyle(Theme.Color.inkFaint))
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.Color.ink)
-                .tint(Theme.Color.ink)
-                .keyboardType(.numberPad)
-                .focused($focusedField, equals: field)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            Text(unit)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.Color.inkFaint)
-        }
-        .padding(.horizontal, Theme.Spacing.md)
-        .padding(.vertical, 13)
-        .frame(maxWidth: .infinity)
-        .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
-        .contentShape(Rectangle())
-        .onTapGesture { focusedField = field }
     }
 
     private func field(
@@ -497,9 +464,12 @@ private struct EditBiometricsSheet: View {
         guard let client else { return }
         age = client.age.map { "\($0)" } ?? ""
         if let cm = client.heightCm {
-            let totalInches = Int((Double(cm) / 2.54).rounded())
-            heightFeet = "\(totalInches / 12)"
-            heightInches = "\(totalInches % 12)"
+            let feet = Client.feetDecimal(fromCm: cm)
+            heightFeet = feet == feet.rounded()
+                ? String(format: "%.0f", feet)
+                : String(format: "%.1f", feet)
+        } else {
+            heightFeet = ""
         }
         startWeight = client.weightKg.map { formatWeight(unit.fromKg(Double($0))) } ?? ""
         if let goalKg = client.goalWeightKg {
@@ -522,11 +492,8 @@ private struct EditBiometricsSheet: View {
         guard let client else { return }
         let newWeightKg = parseWeight(startWeight).map { Int(unit.toKg($0).rounded()) }
         let newGoalKg = parseWeight(goalWeight).map { Int(unit.toKg($0).rounded()) }
-        let feet = Int(heightFeet.trimmingCharacters(in: .whitespaces))
-        let inches = Int(heightInches.trimmingCharacters(in: .whitespaces))
-        let newHeight: Int? = (feet != nil || inches != nil)
-            ? Client.cm(fromFeet: feet ?? 0, inches: inches ?? 0)
-            : nil
+        let feet = Double(heightFeet.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "."))
+        let newHeight: Int? = (feet != nil && feet! > 0) ? Client.cm(fromDecimalFeet: feet!) : nil
         clientStore.updateBiometrics(
             age: Int(age.trimmingCharacters(in: .whitespaces)),
             heightCm: newHeight,

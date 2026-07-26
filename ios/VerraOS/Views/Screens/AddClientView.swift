@@ -133,21 +133,29 @@ struct AddClientView: View {
             VStack(alignment: .leading, spacing: 8) {
                 sectionLabel("Demographics")
                 HStack(spacing: 10) {
-                    field("Age", text: $age).keyboardType(.numberPad)
+                    field("Age", text: $age)
+                        .keyboardType(.numberPad)
+                        .numbersOnly($age)
                     field("Gender", text: $gender)
                 }
-                field("Height (cm)", text: $height).keyboardType(.numberPad)
+                field("Height (ft)", text: $height)
+                    .keyboardType(.decimalPad)
+                    .numbersOnly($height, allowDecimal: true)
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 sectionLabel("Starting Point")
-                field("Current weight (\(unit.short))", text: $weight).keyboardType(.numberPad)
+                field("Current weight (\(unit.short))", text: $weight)
+                    .keyboardType(.decimalPad)
+                    .numbersOnly($weight, allowDecimal: true)
                 field("Injury history", text: $injuries, axis: true)
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 sectionLabel("Goals")
-                field("Goal weight (\(unit.short))", text: $goalWeight).keyboardType(.decimalPad)
+                field("Goal weight (\(unit.short))", text: $goalWeight)
+                    .keyboardType(.decimalPad)
+                    .numbersOnly($goalWeight, allowDecimal: true)
                 skillPicker
             }
 
@@ -259,7 +267,7 @@ struct AddClientView: View {
                     sessionsRemaining: preFill ? sessionBalance : 0,
                     age: preFill ? Int(age) : nil,
                     gender: preFill && !gender.isEmpty ? gender : nil,
-                    heightCm: preFill ? Int(height) : nil,
+                    heightCm: preFill ? heightInCm : nil,
                     weightKg: preFill ? weightInKg : nil,
                     injuryHistory: preFill && !injuries.isEmpty ? injuries : nil,
                     goalWeightKg: preFill ? goalWeightInKg : nil,
@@ -307,6 +315,12 @@ struct AddClientView: View {
     private var goalWeightInKg: Int? {
         guard let value = Double(goalWeight.replacingOccurrences(of: ",", with: ".")), value > 0 else { return nil }
         return Int(unit.toKg(value).rounded())
+    }
+
+    /// Decimal feet (e.g. 5.6) → centimeters for API storage.
+    private var heightInCm: Int? {
+        guard let feet = Double(height.replacingOccurrences(of: ",", with: ".")), feet > 0 else { return nil }
+        return Client.cm(fromDecimalFeet: feet)
     }
 
     private static func initials(from name: String) -> String {

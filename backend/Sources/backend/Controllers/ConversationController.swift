@@ -14,6 +14,8 @@ struct ConversationController: RouteCollection {
         chat.post(":conversationID", "messages", use: send)
         chat.patch(":conversationID", "read", use: markRead)
         chat.patch(":conversationID", "delivered", use: markDelivered)
+        chat.patch(":conversationID", "archive", use: setArchive)
+        chat.delete(":conversationID", use: delete)
         chat.on(.POST, ":conversationID", "attachments", body: .collect(maxSize: "26mb"), use: uploadAttachment)
         chat.get("attachments", ":filename", use: serveAttachment)
 
@@ -139,6 +141,35 @@ struct ConversationController: RouteCollection {
             for: user,
             on: req.db
         )
+    }
+
+    @Sendable
+    func setArchive(req: Request) async throws -> ConversationDTO {
+        let user = try req.auth.require(User.self)
+        guard let conversationID = req.parameters.get("conversationID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Invalid conversation ID")
+        }
+        let payload = try req.content.decode(UpdateConversationArchiveRequest.self)
+        return try await ConversationService.setArchived(
+            conversationID: conversationID,
+            archived: payload.archived,
+            for: user,
+            on: req.db
+        )
+    }
+
+    @Sendable
+    func delete(req: Request) async throws -> HTTPStatus {
+        let user = try req.auth.require(User.self)
+        guard let conversationID = req.parameters.get("conversationID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Invalid conversation ID")
+        }
+        try await ConversationService.softDelete(
+            conversationID: conversationID,
+            for: user,
+            on: req.db
+        )
+        return .noContent
     }
 
     @Sendable

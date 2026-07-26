@@ -25,6 +25,9 @@ final class ProfileStore {
     /// How many workout weeks exist per client (always at least 1).
     private var workoutWeekCounts: [UUID: Int] = [:]
     private var workoutPersistTasks: [String: Task<Void, Never>] = [:]
+    /// Weeks with local edits that haven't been confirmed by a successful save yet.
+    /// Prevents an in-flight `refreshModule` from wiping notes / freestyle rows.
+    private var dirtyWorkoutKeys: Set<String> = []
     private var nutritionPersistTasks: [UUID: Task<Void, Never>] = [:]
     private var weightPersistTasks: [UUID: Task<Void, Never>] = [:]
     private var moduleVisibilityPersistTasks: [UUID: Task<Void, Never>] = [:]
@@ -143,7 +146,9 @@ final class ProfileStore {
     func mutateWeek(_ id: UUID, week: Int, _ transform: (inout [WorkoutDay]) -> Void) {
         var days = workoutWeek(for: id, week: week)
         transform(&days)
-        workoutStore[workoutKey(id, week)] = days
+        let key = workoutKey(id, week)
+        workoutStore[key] = days
+        dirtyWorkoutKeys.insert(key)
         scheduleWorkoutPersist(clientID: id, week: week)
     }
 
@@ -153,6 +158,7 @@ final class ProfileStore {
         guard days.indices.contains(fromIndex), days.indices.contains(toIndex) else { return }
         let source = days[fromIndex]
         days[toIndex].focus = source.focus
+        days[toIndex].notes = source.notes
         days[toIndex].exercises = source.exercises.map {
             WorkoutExercise(
                 exerciseID: $0.exerciseID,
@@ -160,10 +166,13 @@ final class ProfileStore {
                 sets: $0.sets,
                 reps: $0.reps,
                 category: $0.category,
-                kind: $0.kind
+                kind: $0.kind,
+                weightKg: $0.weightKg
             )
         }
-        workoutStore[workoutKey(id, week)] = days
+        let key = workoutKey(id, week)
+        workoutStore[key] = days
+        dirtyWorkoutKeys.insert(key)
         scheduleWorkoutPersist(clientID: id, week: week)
     }
 
@@ -183,12 +192,16 @@ final class ProfileStore {
                         sets: $0.sets,
                         reps: $0.reps,
                         category: $0.category,
-                        kind: $0.kind
+                        kind: $0.kind,
+                        weightKg: $0.weightKg
                     )
-                }
+                },
+                notes: day.notes
             )
         }
-        workoutStore[workoutKey(id, to)] = copied
+        let key = workoutKey(id, to)
+        workoutStore[key] = copied
+        dirtyWorkoutKeys.insert(key)
         scheduleWorkoutPersist(clientID: id, week: to)
     }
 
@@ -328,8 +341,11 @@ final class ProfileStore {
     }
 
     func replaceWorkoutWeek(_ days: [WorkoutDay], week: Int, for id: UUID, weekCount: Int) {
+        let key = workoutKey(id, week)
+        // Never clobber a week the user just edited until the save succeeds.
+        guard !dirtyWorkoutKeys.contains(key) else { return }
         workoutWeekCounts[id] = max(1, weekCount)
-        workoutStore[workoutKey(id, week)] = days
+        workoutStore[key] = days
     }
 }
 
@@ -352,6 +368,10 @@ extension ProfileStore {
         guard let token = AuthStore.accessToken else { return }
         switch module {
         case .workout:
+            let key = workoutKey(client.id, week)
+            // Skip fetch-apply while local edits are still pending — otherwise
+            // freestyle rows and session notes vanish before the debounce fires.
+            if dirtyWorkoutKeys.contains(key) { return }
             if let response = try? await VerraAPI.fetchWorkoutWeek(
                 clientID: client.id,
                 week: week,
@@ -414,6 +434,44 @@ extension ProfileStore {
             try? await Task.sleep(nanoseconds: 450_000_000)
             guard !Task.isCancelled else { return }
             await persistWorkoutWeek(clientID: clientID, week: week)
+        }
+    }
+
+    /// Cancels the debounce and writes the week to the server immediately
+    /// (used by Save Log / Save Freestyle so data doesn't race with refresh).
+    @MainActor
+    func flushWorkoutPersist(clientID: UUID, week: Int) async {
+        let key = workoutKey(clientID, week)
+        workoutPersistTasks[key]?.cancel()
+        workoutPersistTasks[key] = nil
+        dirtyWorkoutKeys.insert(key)
+        await persistWorkoutWeek(clientID: clientID, week: week)
+    }
+
+    @MainActor
+    private func persistWorkoutWeek(clientID: UUID, week: Int) async {
+        guard let token = AuthStore.accessToken else { return }
+        let key = workoutKey(clientID, week)
+        let days = workoutWeek(for: clientID, week: week)
+        let body = PlatformLoader.saveWorkoutBody(
+            from: days,
+            weekCount: workoutWeekCount(for: clientID)
+        )
+        do {
+            let response = try await VerraAPI.saveWorkoutWeek(
+                clientID: clientID,
+                week: week,
+                body: body,
+                accessToken: token
+            )
+            dirtyWorkoutKeys.remove(key)
+            // Only apply the server echo if nothing newer was edited during the save.
+            if !dirtyWorkoutKeys.contains(key) {
+                PlatformLoader.applyWorkoutWeek(response, clientID: clientID, week: week, to: self)
+            }
+        } catch {
+            // Keep dirty so the next refresh doesn't wipe the local edits; retry
+            // will happen on the next mutation/flush.
         }
     }
 
@@ -494,24 +552,6 @@ extension ProfileStore {
             accessToken: token
         ) {
             onVisibleModulesPersisted?(id, dto.visibleModules ?? payload)
-        }
-    }
-
-    @MainActor
-    private func persistWorkoutWeek(clientID: UUID, week: Int) async {
-        guard let token = AuthStore.accessToken else { return }
-        let days = workoutWeek(for: clientID, week: week)
-        let body = PlatformLoader.saveWorkoutBody(
-            from: days,
-            weekCount: workoutWeekCount(for: clientID)
-        )
-        if let response = try? await VerraAPI.saveWorkoutWeek(
-            clientID: clientID,
-            week: week,
-            body: body,
-            accessToken: token
-        ) {
-            PlatformLoader.applyWorkoutWeek(response, clientID: clientID, week: week, to: self)
         }
     }
 
