@@ -160,10 +160,11 @@ struct WorkoutPlanView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.sm)
+                .padding(.bottom, Theme.Spacing.xl)
             }
             .frame(maxHeight: .infinity)
             .tabScrollContent()
-            .dismissKeyboardOnScroll()
+            .formKeyboardBehavior()
         }
         .background(Theme.Color.background)
         .toast($toast)
@@ -519,7 +520,7 @@ struct WorkoutPlanView: View {
                     editorTarget = .editExercise(item)
                 },
                 onDelete: { deleteExercise(item) },
-                onShowProgress: item.weightKg != nil ? { progressExercise = item } : nil
+                onShowProgress: item.isRestItem ? nil : { progressExercise = item }
             )
             .opacity(draggingID == item.id ? 0.4 : 1)
             .modifier(reorderModifier(id: item.id, name: item.name, beforeID: item.id, sectionHeaderID: nil))
@@ -859,14 +860,12 @@ struct WorkoutPlanView: View {
                 }
             }
             Spacer(minLength: 6)
-            if item.weightKg != nil {
-                Button { progressExercise = item } label: {
-                    Image(systemName: "chart.line.uptrend.xyaxis")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.Color.accent)
-                }
-                .buttonStyle(.plain)
+            Button { progressExercise = item } label: {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.Color.accent)
             }
+            .buttonStyle(.plain)
             Button { deleteExercise(item) } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 12, weight: .semibold))
@@ -1284,11 +1283,9 @@ private struct BuilderItemRow: View {
                         .font(.system(size: 13.5, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.Color.inkMuted)
                 }
-                if let weightKg = item.weightKg {
-                    Text(BuilderItemRow.weightLabel(weightKg))
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Color.accentInk)
-                }
+                // Clients can log the weight they actually used, even though
+                // the rest of the plan stays read-only.
+                field(placeholder: "kg", text: $weightText, keyboard: .decimalPad, width: 52)
                 if let onShowProgress {
                     Button(action: onShowProgress) {
                         Image(systemName: "chart.line.uptrend.xyaxis")
@@ -1325,7 +1322,7 @@ private struct BuilderItemRow: View {
                 }
                 .buttonStyle(.plain)
                 Spacer(minLength: 6)
-                if let onShowProgress, item.weightKg != nil {
+                if let onShowProgress {
                     Button(action: onShowProgress) {
                         Image(systemName: "chart.line.uptrend.xyaxis")
                             .font(.system(size: 13, weight: .semibold))
@@ -1719,18 +1716,30 @@ private struct ExerciseProgressSheet: View {
         return results
     }
 
+    private var trend: ExerciseWeightTrend {
+        ExerciseWeightTrend(values: points.map(\.weightKg))
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: Theme.Spacing.md) {
                 if isLoading {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if points.count < 2 {
+                } else if points.isEmpty {
                     emptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
+                    trendSummary
                     chartCard
-                    Spacer()
+                    if points.count < 2 {
+                        Text("Log this exercise across another week to unlock a clearer trend.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.Color.inkMuted)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                    }
+                    Spacer(minLength: 0)
                 }
             }
             .padding(Theme.Spacing.md)
@@ -1759,15 +1768,42 @@ private struct ExerciseProgressSheet: View {
             Image(systemName: "chart.line.uptrend.xyaxis")
                 .font(.system(size: 28, weight: .semibold))
                 .foregroundStyle(Theme.Color.inkFaint)
-            Text("Not enough data yet")
+            Text("No recorded weights yet")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(Theme.Color.ink)
-            Text("Log a weight for \(exerciseName) across at least two weeks to see a trend here.")
+            Text("Log a weight for \(exerciseName) on this exercise to start tracking progress.")
                 .font(.system(size: 13.5, weight: .medium))
                 .foregroundStyle(Theme.Color.inkMuted)
                 .multilineTextAlignment(.center)
         }
         .padding(.horizontal, Theme.Spacing.md)
+    }
+
+    private var trendSummary: some View {
+        HStack(spacing: 12) {
+            Image(systemName: trend.symbol)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(trend.tint)
+                .frame(width: 40, height: 40)
+                .background(trend.tint.opacity(0.15), in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(trend.title)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Theme.Color.ink)
+                Text(trend.subtitle)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.Color.inkMuted)
+            }
+            Spacer(minLength: 0)
+            if let delta = trend.deltaLabel {
+                Text(delta)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(trend.tint)
+            }
+        }
+        .padding(Theme.Spacing.md)
+        .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
     }
 
     private var chartCard: some View {
@@ -1798,6 +1834,81 @@ private struct ExerciseProgressSheet: View {
     }
 }
 
+/// Classifies weight history as increasing, decreasing, or consistent.
+private struct ExerciseWeightTrend {
+    enum Direction {
+        case increasing, decreasing, consistent, insufficient
+    }
+
+    let direction: Direction
+    let deltaKg: Double?
+
+    init(values: [Double]) {
+        guard values.count >= 2, let first = values.first, let last = values.last else {
+            direction = .insufficient
+            deltaKg = nil
+            return
+        }
+        let delta = last - first
+        deltaKg = delta
+        // Treat small absolute/relative changes as flat so day-to-day noise
+        // doesn't read as a trend.
+        let threshold = max(abs(first) * 0.02, 0.5)
+        if abs(delta) < threshold {
+            direction = .consistent
+        } else if delta > 0 {
+            direction = .increasing
+        } else {
+            direction = .decreasing
+        }
+    }
+
+    var title: String {
+        switch direction {
+        case .increasing: return "Increasing"
+        case .decreasing: return "Decreasing"
+        case .consistent: return "Consistent"
+        case .insufficient: return "Getting started"
+        }
+    }
+
+    var subtitle: String {
+        switch direction {
+        case .increasing: return "Working weight is trending up over time."
+        case .decreasing: return "Working weight is trending down over time."
+        case .consistent: return "Working weight has stayed about the same."
+        case .insufficient: return "Need at least two weeks of logged weights."
+        }
+    }
+
+    var symbol: String {
+        switch direction {
+        case .increasing: return "arrow.up.right"
+        case .decreasing: return "arrow.down.right"
+        case .consistent: return "arrow.right"
+        case .insufficient: return "chart.line.uptrend.xyaxis"
+        }
+    }
+
+    var tint: Color {
+        switch direction {
+        case .increasing: return Color(hex: 0x57C77B)
+        case .decreasing: return Theme.Color.danger
+        case .consistent: return Theme.Color.inkMuted
+        case .insufficient: return Theme.Color.inkFaint
+        }
+    }
+
+    var deltaLabel: String? {
+        guard let deltaKg else { return nil }
+        let trimmed = abs(deltaKg).truncatingRemainder(dividingBy: 1) == 0
+            ? String(Int(abs(deltaKg)))
+            : String(format: "%.1f", abs(deltaKg))
+        let sign = deltaKg > 0 ? "+" : (deltaKg < 0 ? "−" : "")
+        return "\(sign)\(trimmed) kg"
+    }
+}
+
 /// Minimal Path-based line chart (no Swift Charts dependency) matching the
 /// visual language of `WeightTrendChart`.
 private struct ExerciseTrendChart: View {
@@ -1817,16 +1928,18 @@ private struct ExerciseTrendChart: View {
             let w = geo.size.width
             let h = geo.size.height
             let pts: [CGPoint] = values.enumerated().map { i, v in
-                let x = values.count <= 1 ? 0 : w * CGFloat(i) / CGFloat(values.count - 1)
+                let x = values.count <= 1 ? w / 2 : w * CGFloat(i) / CGFloat(values.count - 1)
                 return CGPoint(x: x, y: y(v, in: h))
             }
             ZStack {
                 Path { p in
                     guard let first = pts.first else { return }
-                    p.move(to: CGPoint(x: 0, y: h))
+                    p.move(to: CGPoint(x: first.x, y: h))
                     p.addLine(to: first)
                     for pt in pts.dropFirst() { p.addLine(to: pt) }
-                    p.addLine(to: CGPoint(x: w, y: h))
+                    if let last = pts.last {
+                        p.addLine(to: CGPoint(x: last.x, y: h))
+                    }
                     p.closeSubpath()
                 }
                 .fill(LinearGradient(colors: [Theme.Color.accent.opacity(0.35), Theme.Color.accent.opacity(0)], startPoint: .top, endPoint: .bottom))

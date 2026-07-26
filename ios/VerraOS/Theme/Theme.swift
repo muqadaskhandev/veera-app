@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// VerraOS design tokens. Editorial "paper" aesthetic with a single
 /// electric-lime accent reserved for active / emphasis states.
@@ -53,8 +54,22 @@ enum Theme {
 
     /// Layout helpers for the fixed bottom tab bar.
     enum Layout {
-        /// Breathing room after the last row in tab-root scroll views.
-        static let scrollBottomPadding: CGFloat = 24
+        /// Extra scroll content inset so the last rows clear the sticky tab bar
+        /// even when nested `NavigationStack` destinations don't fully inherit
+        /// the parent's bottom `safeAreaInset`.
+        static let scrollBottomPadding: CGFloat = 96
+    }
+}
+
+enum Keyboard {
+    /// Resigns the current first responder (any focused text field).
+    static func dismiss() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 }
 
@@ -80,9 +95,40 @@ extension View {
         contentMargins(.bottom, Theme.Layout.scrollBottomPadding, for: .scrollContent)
     }
 
-    /// Lets the keyboard follow a drag on a `ScrollView` full of text fields,
-    /// dismissing interactively instead of requiring a tap elsewhere first.
+    /// Lets the keyboard follow a drag / swipe on a `ScrollView`, dismissing
+    /// interactively as the user scrolls away from the focused field.
     func dismissKeyboardOnScroll() -> some View {
         scrollDismissesKeyboard(.interactively)
+    }
+
+    /// Dismisses the keyboard when the user taps empty space (outside fields).
+    /// Uses a simultaneous gesture so buttons and text fields still receive taps.
+    func dismissKeyboardOnTap() -> some View {
+        simultaneousGesture(
+            TapGesture().onEnded { _ in
+                Keyboard.dismiss()
+            }
+        )
+    }
+
+    /// Adds a Done button above the software keyboard so number/decimal pads
+    /// (which lack a return key) can be dismissed explicitly.
+    func keyboardDismissToolbar(_ title: String = "Done") -> some View {
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button(title) { Keyboard.dismiss() }
+                    .font(.system(size: 16, weight: .semibold))
+            }
+        }
+    }
+
+    /// Combined keyboard UX for form/scroll screens: swipe-to-dismiss,
+    /// tap-outside, and a Done button on the keyboard accessory bar.
+    func formKeyboardBehavior() -> some View {
+        self
+            .dismissKeyboardOnScroll()
+            .dismissKeyboardOnTap()
+            .keyboardDismissToolbar()
     }
 }

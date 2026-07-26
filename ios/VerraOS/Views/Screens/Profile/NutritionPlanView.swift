@@ -36,9 +36,9 @@ struct NutritionPlanView: View {
                 .padding(.top, Theme.Spacing.sm)
                 .padding(.bottom, Theme.Spacing.xl)
             }
-            .frame(maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .tabScrollContent()
-            .dismissKeyboardOnScroll()
+            .formKeyboardBehavior()
         }
         .background(Theme.Color.background)
         .toast($toast)
@@ -294,27 +294,30 @@ private struct MacroEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: Theme.Spacing.md) {
-                macroField(title: "Protein", text: $protein, tint: Color(hex: 0xE8483D))
-                macroField(title: "Carbs", text: $carbs, tint: Color(hex: 0xE8893C))
-                macroField(title: "Fats", text: $fats, tint: Color(hex: 0xE7B83C))
-                HStack {
-                    Text("Daily Energy")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.Color.inkMuted)
-                    Spacer()
-                    Text("\(liveCalories.formatted()) kcal")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Color.ink)
-                        .contentTransition(.numericText())
-                        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: liveCalories)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: Theme.Spacing.md) {
+                    macroField(title: "Protein", text: $protein, tint: Color(hex: 0xE8483D))
+                    macroField(title: "Carbs", text: $carbs, tint: Color(hex: 0xE8893C))
+                    macroField(title: "Fats", text: $fats, tint: Color(hex: 0xE7B83C))
+                    HStack {
+                        Text("Daily Energy")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.Color.inkMuted)
+                        Spacer()
+                        Text("\(liveCalories.formatted()) kcal")
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.Color.ink)
+                            .contentTransition(.numericText())
+                            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: liveCalories)
+                    }
+                    .padding(Theme.Spacing.sm)
+                    .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
                 }
-                .padding(Theme.Spacing.sm)
-                .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
-                Spacer()
+                .padding(Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xl)
             }
-            .padding(Theme.Spacing.md)
             .background(Theme.Color.background)
+            .formKeyboardBehavior()
             .navigationTitle("Edit Targets")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -331,7 +334,8 @@ private struct MacroEditorSheet: View {
                 }
             }
         }
-        .presentationDetents([.height(420)])
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     private func macroField(title: String, text: Binding<String>, tint: Color) -> some View {
@@ -372,18 +376,21 @@ private struct NoteEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                TextField("Write a protocol note…", text: $text, axis: .vertical)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(Theme.Color.ink)
-                    .lineLimit(4...10)
-                    .padding(Theme.Spacing.sm)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
-                Spacer()
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                    TextField("Write a protocol note…", text: $text, axis: .vertical)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Theme.Color.ink)
+                        .lineLimit(4...12)
+                        .padding(Theme.Spacing.sm)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                }
+                .padding(Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xl)
             }
-            .padding(Theme.Spacing.md)
             .background(Theme.Color.background)
+            .formKeyboardBehavior()
             .navigationTitle(note == nil ? "Add Note" : "Edit Note")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -402,7 +409,8 @@ private struct NoteEditorSheet: View {
                 }
             }
         }
-        .presentationDetents([.height(300)])
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }
 
@@ -425,26 +433,29 @@ private struct SupplementEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                fieldLabel("Name")
-                TextField("e.g. Creatine Monohydrate", text: $name)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.Color.ink)
-                    .padding(Theme.Spacing.sm)
-                    .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                    fieldLabel("Name")
+                    TextField("e.g. Creatine Monohydrate", text: $name)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.Color.ink)
+                        .padding(Theme.Spacing.sm)
+                        .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
 
-                fieldLabel("Dosage / notes (optional)")
-                TextField("e.g. 5g daily", text: $dosage, axis: .vertical)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(Theme.Color.ink)
-                    .lineLimit(1...4)
-                    .padding(Theme.Spacing.sm)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
-                Spacer()
+                    fieldLabel("Dosage / notes (optional)")
+                    TextField("e.g. 5g daily", text: $dosage, axis: .vertical)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Theme.Color.ink)
+                        .lineLimit(1...4)
+                        .padding(Theme.Spacing.sm)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                }
+                .padding(Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xl)
             }
-            .padding(Theme.Spacing.md)
             .background(Theme.Color.background)
+            .formKeyboardBehavior()
             .navigationTitle(supplement == nil ? "Add Supplement" : "Edit Supplement")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -465,7 +476,8 @@ private struct SupplementEditorSheet: View {
                 }
             }
         }
-        .presentationDetents([.height(340)])
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     private func fieldLabel(_ text: String) -> some View {

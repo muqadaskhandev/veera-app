@@ -57,10 +57,11 @@ struct WeightTrackingView: View {
                 }
                 .padding(.horizontal, Theme.Spacing.md)
                 .padding(.top, Theme.Spacing.sm)
+                .padding(.bottom, Theme.Spacing.xl)
             }
-            .frame(maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .tabScrollContent()
-            .dismissKeyboardOnScroll()
+            .formKeyboardBehavior()
         }
         .background(Theme.Color.background)
         .toast($toast)
@@ -305,26 +306,29 @@ private struct LogWeightSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                Text("Today's weight")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.Color.inkMuted)
-                HStack(spacing: 8) {
-                    TextField("0.0", text: $text)
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Color.ink)
-                        .keyboardType(.decimalPad)
-                    Text(unit.short)
-                        .font(.system(size: 18, weight: .semibold))
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                    Text("Today's weight")
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.Color.inkMuted)
+                    HStack(spacing: 8) {
+                        TextField("0.0", text: $text)
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.Color.ink)
+                            .keyboardType(.decimalPad)
+                        Text(unit.short)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Theme.Color.inkMuted)
+                    }
+                    .padding(Theme.Spacing.md)
+                    .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
                 }
                 .padding(Theme.Spacing.md)
-                .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
-                Spacer()
+                .padding(.bottom, Theme.Spacing.xl)
             }
-            .padding(Theme.Spacing.md)
             .background(Theme.Color.background)
+            .formKeyboardBehavior()
             .navigationTitle("Log Weight")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -343,7 +347,8 @@ private struct LogWeightSheet: View {
                 }
             }
         }
-        .presentationDetents([.height(240)])
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 }
 
@@ -374,14 +379,17 @@ private struct WeightDetailsSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: Theme.Spacing.md) {
-                field(title: "Starting weight", text: $startText)
-                field(title: "Current weight", text: $currentText)
-                field(title: "Target weight", text: $goalText, accent: true)
-                Spacer()
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: Theme.Spacing.md) {
+                    field(title: "Starting weight", text: $startText)
+                    field(title: "Current weight", text: $currentText)
+                    field(title: "Target weight", text: $goalText, accent: true)
+                }
+                .padding(Theme.Spacing.md)
+                .padding(.bottom, Theme.Spacing.xl)
             }
-            .padding(Theme.Spacing.md)
             .background(Theme.Color.background)
+            .formKeyboardBehavior()
             .navigationTitle("Edit Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -401,7 +409,8 @@ private struct WeightDetailsSheet: View {
                 }
             }
         }
-        .presentationDetents([.height(360)])
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     private func parse(_ s: String) -> Double? {
