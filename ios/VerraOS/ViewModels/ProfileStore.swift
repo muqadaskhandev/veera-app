@@ -28,6 +28,9 @@ final class ProfileStore {
     /// Weeks with local edits that haven't been confirmed by a successful save yet.
     /// Prevents an in-flight `refreshModule` from wiping notes / freestyle rows.
     private var dirtyWorkoutKeys: Set<String> = []
+    /// Bumped on every local edit; lets an in-flight save detect that newer
+    /// edits happened while it was running so its stale echo isn't applied.
+    private var workoutEditGenerations: [String: Int] = [:]
     private var nutritionPersistTasks: [UUID: Task<Void, Never>] = [:]
     private var weightPersistTasks: [UUID: Task<Void, Never>] = [:]
     private var moduleVisibilityPersistTasks: [UUID: Task<Void, Never>] = [:]
@@ -149,6 +152,7 @@ final class ProfileStore {
         let key = workoutKey(id, week)
         workoutStore[key] = days
         dirtyWorkoutKeys.insert(key)
+        workoutEditGenerations[key, default: 0] += 1
         scheduleWorkoutPersist(clientID: id, week: week)
     }
 
@@ -173,6 +177,7 @@ final class ProfileStore {
         let key = workoutKey(id, week)
         workoutStore[key] = days
         dirtyWorkoutKeys.insert(key)
+        workoutEditGenerations[key, default: 0] += 1
         scheduleWorkoutPersist(clientID: id, week: week)
     }
 
@@ -202,6 +207,7 @@ final class ProfileStore {
         let key = workoutKey(id, to)
         workoutStore[key] = copied
         dirtyWorkoutKeys.insert(key)
+        workoutEditGenerations[key, default: 0] += 1
         scheduleWorkoutPersist(clientID: id, week: to)
     }
 
@@ -452,6 +458,7 @@ extension ProfileStore {
     private func persistWorkoutWeek(clientID: UUID, week: Int) async {
         guard let token = AuthStore.accessToken else { return }
         let key = workoutKey(clientID, week)
+        let generationAtSave = workoutEditGenerations[key] ?? 0
         let days = workoutWeek(for: clientID, week: week)
         let body = PlatformLoader.saveWorkoutBody(
             from: days,
@@ -464,11 +471,12 @@ extension ProfileStore {
                 body: body,
                 accessToken: token
             )
+            // If the user edited while this save was in flight, keep the week
+            // dirty (the newer mutation's debounce will re-save) and drop the
+            // stale echo so it can't wipe those edits.
+            guard (workoutEditGenerations[key] ?? 0) == generationAtSave else { return }
             dirtyWorkoutKeys.remove(key)
-            // Only apply the server echo if nothing newer was edited during the save.
-            if !dirtyWorkoutKeys.contains(key) {
-                PlatformLoader.applyWorkoutWeek(response, clientID: clientID, week: week, to: self)
-            }
+            PlatformLoader.applyWorkoutWeek(response, clientID: clientID, week: week, to: self)
         } catch {
             // Keep dirty so the next refresh doesn't wipe the local edits; retry
             // will happen on the next mutation/flush.
