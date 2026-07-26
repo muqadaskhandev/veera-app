@@ -305,9 +305,10 @@ struct FinancialsView: View {
                     .font(.system(size: 14.5, weight: .semibold))
                     .foregroundStyle(Theme.Color.ink)
                     .lineLimit(1)
-                Text(event.date.formatted(.dateTime.month(.abbreviated).day()))
+                Text(ledgerTimestamp(event.date))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.Color.inkFaint)
+                    .monospacedDigit()
             }
             Spacer(minLength: 6)
             ledgerAmount(event)
@@ -334,6 +335,12 @@ struct FinancialsView: View {
     }
 
     // MARK: Helpers
+
+    private func ledgerTimestamp(_ date: Date) -> String {
+        let day = date.formatted(.dateTime.day().month(.abbreviated).year())
+        let time = date.formatted(.dateTime.hour().minute())
+        return "\(day) · \(time)"
+    }
 
     @MainActor
     private func refresh() async {

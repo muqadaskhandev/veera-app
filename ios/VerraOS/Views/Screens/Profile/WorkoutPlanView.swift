@@ -65,7 +65,10 @@ struct WorkoutPlanView: View {
     var onBack: () -> Void
 
     @Environment(ProfileStore.self) private var profile
+    @Environment(TrainerStore.self) private var trainer
     @Environment(\.isReadOnly) private var isReadOnly
+
+    private var unit: WeightUnit { trainer.units }
 
     @State private var weekIndex = 0
     @State private var selectedDayIndex: Int
@@ -853,7 +856,7 @@ struct WorkoutPlanView: View {
                             .foregroundStyle(Theme.Color.inkMuted)
                     }
                     if let weightKg = item.weightKg {
-                        Text(WorkoutPlanView.weightLabel(weightKg))
+                        Text(unit.format(weightKg))
                             .font(.system(size: 12, weight: .bold, design: .rounded))
                             .foregroundStyle(Theme.Color.accentInk)
                     }
@@ -888,7 +891,7 @@ struct WorkoutPlanView: View {
             HStack(spacing: 8) {
                 miniField(placeholder: "Sets", text: $freestyleSetsText)
                 miniField(placeholder: "Reps", text: $freestyleRepsText)
-                miniField(placeholder: "Weight (kg)", text: $freestyleWeightText, isDecimal: true)
+                miniField(placeholder: "Weight (\(unit.short))", text: $freestyleWeightText, isDecimal: true)
             }
 
             Button(action: addFreestyleExercise) {
@@ -942,11 +945,6 @@ struct WorkoutPlanView: View {
         }
     }
 
-    private static func weightLabel(_ kg: Double) -> String {
-        let trimmed = kg.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(kg)) : String(format: "%.1f", kg)
-        return "\(trimmed) kg"
-    }
-
     // MARK: Actions
 
     private func startAddExercise(headerID: UUID) {
@@ -997,6 +995,7 @@ struct WorkoutPlanView: View {
     private func addFreestyleExercise() {
         let trimmed = freestyleName.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
+        let enteredWeight = Double(freestyleWeightText.replacingOccurrences(of: ",", with: "."))
         insertItem(
             WorkoutExercise(
                 name: trimmed,
@@ -1004,7 +1003,8 @@ struct WorkoutPlanView: View {
                 reps: Int(freestyleRepsText),
                 category: "Freestyle",
                 kind: .exercise,
-                weightKg: Double(freestyleWeightText)
+                // Persist kilograms; convert from the active display unit.
+                weightKg: enteredWeight.map { unit.toKg($0) }
             ),
             underHeaderID: nil
         )
@@ -1211,9 +1211,13 @@ private struct BuilderItemRow: View {
     var onDelete: () -> Void
     var onShowProgress: (() -> Void)?
 
+    @Environment(TrainerStore.self) private var trainer
+
     @State private var setsText: String
     @State private var repsText: String
     @State private var weightText: String
+
+    private var unit: WeightUnit { trainer.units }
 
     init(
         item: WorkoutExercise,
@@ -1231,15 +1235,26 @@ private struct BuilderItemRow: View {
         self.onShowProgress = onShowProgress
         _setsText = State(initialValue: item.sets.map(String.init) ?? "")
         _repsText = State(initialValue: item.reps.map(String.init) ?? "")
-        _weightText = State(initialValue: item.weightKg.map { $0.truncatingRemainder(dividingBy: 1) == 0 ? String(Int($0)) : String($0) } ?? "")
+        // Seeded empty — synced from stored kg once the environment unit is available.
+        _weightText = State(initialValue: "")
     }
 
     var body: some View {
-        if item.isRestItem {
-            restRow
-        } else {
-            exerciseRow
+        Group {
+            if item.isRestItem {
+                restRow
+            } else {
+                exerciseRow
+            }
         }
+        .onAppear { syncWeightField() }
+        // Re-convert the stored kg value when the app-wide unit setting flips.
+        .onChange(of: unit) { _, _ in syncWeightField() }
+    }
+
+    /// Refresh the editable field from the kg value using the active unit.
+    private func syncWeightField() {
+        weightText = item.weightKg.map { unit.formatField($0) } ?? ""
     }
 
     private var restRow: some View {
@@ -1285,7 +1300,7 @@ private struct BuilderItemRow: View {
                 }
                 // Clients can log the weight they actually used, even though
                 // the rest of the plan stays read-only.
-                field(placeholder: "kg", text: $weightText, keyboard: .decimalPad, width: 52)
+                field(placeholder: unit.short, text: $weightText, keyboard: .decimalPad, width: 56)
                 if let onShowProgress {
                     Button(action: onShowProgress) {
                         Image(systemName: "chart.line.uptrend.xyaxis")
@@ -1335,7 +1350,7 @@ private struct BuilderItemRow: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Theme.Color.inkFaint)
                 field(placeholder: "Reps", text: $repsText, keyboard: .numberPad)
-                field(placeholder: "kg", text: $weightText, keyboard: .decimalPad, width: 52)
+                field(placeholder: unit.short, text: $weightText, keyboard: .decimalPad, width: 56)
                 deleteButton
             }
         }
@@ -1366,12 +1381,9 @@ private struct BuilderItemRow: View {
     }
 
     private func commit() {
-        onCommit(Int(setsText), Int(repsText), Double(weightText))
-    }
-
-    static func weightLabel(_ kg: Double) -> String {
-        let trimmed = kg.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(kg)) : String(format: "%.1f", kg)
-        return "\(trimmed) kg"
+        let entered = Double(weightText.replacingOccurrences(of: ",", with: "."))
+        // Convert display-unit input back to kilograms before persisting.
+        onCommit(Int(setsText), Int(repsText), entered.map { unit.toKg($0) })
     }
 }
 
@@ -1691,11 +1703,14 @@ private struct ReorderModifier: ViewModifier {
 private struct ExerciseProgressSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ProfileStore.self) private var profile
+    @Environment(TrainerStore.self) private var trainer
     let client: Client
     let exerciseName: String
     let exerciseID: UUID?
 
     @State private var isLoading = true
+
+    private var unit: WeightUnit { trainer.units }
 
     private var points: [(week: Int, weightKg: Double)] {
         var results: [(Int, Double)] = []
@@ -1716,8 +1731,13 @@ private struct ExerciseProgressSheet: View {
         return results
     }
 
+    /// Chart values converted into the active display unit.
+    private var displayValues: [Double] {
+        points.map { unit.fromKg($0.weightKg) }
+    }
+
     private var trend: ExerciseWeightTrend {
-        ExerciseWeightTrend(values: points.map(\.weightKg))
+        ExerciseWeightTrend(valuesKg: points.map(\.weightKg), unit: unit)
     }
 
     var body: some View {
@@ -1814,12 +1834,12 @@ private struct ExerciseProgressSheet: View {
                     .foregroundStyle(Theme.Color.inkMuted)
                 Spacer()
                 if let last = points.last {
-                    Text(BuilderItemRow.weightLabel(last.weightKg))
+                    Text(unit.format(last.weightKg))
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.Color.ink)
                 }
             }
-            ExerciseTrendChart(values: points.map(\.weightKg))
+            ExerciseTrendChart(values: displayValues)
             HStack {
                 Text("Week \((points.first?.week ?? 0) + 1)")
                 Spacer()
@@ -1842,9 +1862,11 @@ private struct ExerciseWeightTrend {
 
     let direction: Direction
     let deltaKg: Double?
+    let unit: WeightUnit
 
-    init(values: [Double]) {
-        guard values.count >= 2, let first = values.first, let last = values.last else {
+    init(valuesKg: [Double], unit: WeightUnit) {
+        self.unit = unit
+        guard valuesKg.count >= 2, let first = valuesKg.first, let last = valuesKg.last else {
             direction = .insufficient
             deltaKg = nil
             return
@@ -1852,7 +1874,7 @@ private struct ExerciseWeightTrend {
         let delta = last - first
         deltaKg = delta
         // Treat small absolute/relative changes as flat so day-to-day noise
-        // doesn't read as a trend.
+        // doesn't read as a trend. Threshold is in kilograms.
         let threshold = max(abs(first) * 0.02, 0.5)
         if abs(delta) < threshold {
             direction = .consistent
@@ -1901,11 +1923,7 @@ private struct ExerciseWeightTrend {
 
     var deltaLabel: String? {
         guard let deltaKg else { return nil }
-        let trimmed = abs(deltaKg).truncatingRemainder(dividingBy: 1) == 0
-            ? String(Int(abs(deltaKg)))
-            : String(format: "%.1f", abs(deltaKg))
-        let sign = deltaKg > 0 ? "+" : (deltaKg < 0 ? "−" : "")
-        return "\(sign)\(trimmed) kg"
+        return unit.formatDelta(deltaKg)
     }
 }
 

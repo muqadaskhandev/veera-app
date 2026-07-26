@@ -195,7 +195,13 @@ struct ClientRootView: View {
         .sheet(isPresented: $showingSettings) {
             ClientSettingsView(
                 unit: trainer.units,
-                onSelectUnit: { trainer.units = $0 },
+                onSelectUnit: { newUnit in
+                    // Update both the reactive display unit and the cached
+                    // account string so a background refresh can't revert it
+                    // before the debounced server save lands.
+                    trainer.units = newUnit
+                    account.weightUnit = newUnit.rawValue
+                },
                 onLogOut: onLogOut,
                 onDeleteAccount: onLogOut,
                 onTrainerLinked: { Task { await refreshAll() } }

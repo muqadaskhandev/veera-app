@@ -97,6 +97,7 @@ func configure(_ app: Application) async throws {
     app.migrations.add(SeedDefaultAdmin())
     app.migrations.add(AddSessionTimeZone())
     app.migrations.add(AddConversationArchiveDelete())
+    app.migrations.add(BackfillInitialPackageLedgerEntries())
 
     app.lifecycle.use(ReminderPollingService())
 

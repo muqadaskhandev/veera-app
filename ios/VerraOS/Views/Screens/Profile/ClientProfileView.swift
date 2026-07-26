@@ -21,11 +21,14 @@ struct ClientProfileView: View {
 
     @Environment(ClientStore.self) private var clientStore
     @Environment(ProfileStore.self) private var profile
+    @Environment(TrainerStore.self) private var trainer
 
     @State private var showingSettings = false
     @State private var showingNote = false
     @State private var showingBiometrics = false
     @State private var toast: ToastData?
+
+    private var unit: WeightUnit { trainer.units }
 
     /// Live client lookup so the header reflects edits / session-bank changes.
     private var client: Client? {
@@ -146,10 +149,10 @@ struct ClientProfileView: View {
     // MARK: Biometrics
 
     private func biometrics(_ client: Client) -> some View {
-        let start = client.weightKg.map { "\($0) kg" } ?? "—"
-        let goal = client.goalWeightKg.map { "\($0) kg" }
-            ?? profile.weightTargets(for: client).goal.map { "\(Int($0)) kg" }
-            ?? "—"
+        // Weights are stored in kg; render them in the trainer's chosen unit.
+        let start = client.weightKg.map { unit.format(Double($0), fractionDigits: unit == .lbs ? 1 : 0) } ?? "—"
+        let goalKg = client.goalWeightKg.map(Double.init) ?? profile.weightTargets(for: client).goal
+        let goal = goalKg.map { unit.format($0, fractionDigits: unit == .lbs ? 1 : 0) } ?? "—"
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("CLIENT DETAILS")

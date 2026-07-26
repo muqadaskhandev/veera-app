@@ -36,6 +36,20 @@ struct ClientFinancialsView: View {
             case .adjustments: return entry.kind == .adjustment
             }
         }
+
+        /// Short hint shown under the filter chips.
+        var caption: String {
+            switch self {
+            case .all:
+                return "Packages, sessions, and manual +/- adjustments."
+            case .packages:
+                return "Packs assigned via Add Package or when inviting a client with prepaid sessions."
+            case .sessions:
+                return "Sessions deducted when marked complete or with − on the bank."
+            case .adjustments:
+                return "Manual + taps on the session bank."
+            }
+        }
     }
 
     private let historyPreviewCount = 4
@@ -161,9 +175,10 @@ struct ClientFinancialsView: View {
                                     .foregroundStyle(Theme.Color.inkMuted)
                             }
                             Spacer()
-                            Text(entry.date.formatted(.dateTime.month(.abbreviated).day()))
+                            Text(entry.date.formatted(.dateTime.day().month(.abbreviated).year().hour().minute()))
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(Theme.Color.inkFaint)
+                                .monospacedDigit()
                         }
                     }
                 }
@@ -322,6 +337,10 @@ struct ClientFinancialsView: View {
         return SectionCard(title: "Usage History", icon: "clock.arrow.circlepath") {
             VStack(spacing: 12) {
                 filterRow
+                Text(historyFilter.caption)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Theme.Color.inkFaint)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if entries.isEmpty {
                     Text(emptyHistoryMessage)
                         .font(.system(size: 13.5, weight: .medium))
@@ -360,15 +379,15 @@ struct ClientFinancialsView: View {
         case .all:
             return isReadOnly
                 ? "No activity yet. Package purchases and completed sessions will show here."
-                : "No entries yet — add a package or log a session."
+                : "No entries yet — add a package or tap + / − on the session bank."
         case .packages:
             return isReadOnly
                 ? "No packages yet. Your trainer adds these after you purchase a session pack."
-                : "No packages yet — use the calculator above to add one."
+                : "No packages yet. Use Add Package above, or invite/create a client with prepaid sessions — both appear here automatically."
         case .sessions:
             return "No completed sessions logged yet."
         case .adjustments:
-            return "No manual adjustments yet."
+            return "No manual adjustments yet. Tap + on the session bank to add one."
         }
     }
 
@@ -408,51 +427,77 @@ struct ClientFinancialsView: View {
     }
 
     private func compactRow(_ entry: LedgerEntry) -> some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: entry.kind.icon)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(entry.kind.tint)
                 .frame(width: 20)
-            Text(entry.kind == .packageAdded ? "Package added" : entry.title)
-                .font(.system(size: 13.5, weight: .semibold))
-                .foregroundStyle(Theme.Color.ink)
-                .lineLimit(1)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.kind == .packageAdded ? "Package added" : entry.title)
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(Theme.Color.ink)
+                    .lineLimit(1)
+                Text(historyTimestamp(entry.date))
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Theme.Color.inkFaint)
+                    .monospacedDigit()
+            }
             Spacer(minLength: 6)
-            Text(entry.date.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(Theme.Color.inkFaint)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
             Text(entry.delta > 0 ? "+\(entry.delta)" : "\(entry.delta)")
                 .font(.system(size: 13.5, weight: .bold, design: .rounded))
                 .foregroundStyle(entry.delta > 0 ? Color(hex: 0x57C77B) : Theme.Color.ink)
                 .frame(minWidth: 28, alignment: .trailing)
+                .padding(.top, 2)
             if let amount = entry.amount {
                 Text(String(format: "$%.0f", amount))
                     .font(.system(size: 11.5, weight: .semibold))
                     .foregroundStyle(Theme.Color.inkMuted)
                     .frame(minWidth: 40, alignment: .trailing)
+                    .padding(.top, 2)
             }
         }
-        .padding(.vertical, 7)
+        .padding(.vertical, 9)
+    }
+
+    /// Always shows calendar date + exact clock time (e.g. "25 Jul 2026 · 6:52 PM").
+    private func historyTimestamp(_ date: Date) -> String {
+        let day = date.formatted(.dateTime.day().month(.abbreviated).year())
+        let time = date.formatted(.dateTime.hour().minute())
+        return "\(day) · \(time)"
     }
 
     // MARK: Actions
 
     private func adjust(_ delta: Int, _ client: Client) {
-        // Update the bank and toast immediately so the UI feels instant, then
-        // sync with the backend and roll back if the request fails.
-        clientStore.adjustSessionsRemaining(by: delta, for: client.id)
+        // Optimistic bank + history row first; network confirms in the background.
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+            clientStore.adjustSessionsRemaining(by: delta, for: client.id)
+        }
         let optimisticRemaining = clientStore.clients.first(where: { $0.id == client.id })?.sessionsRemaining ?? 0
         toast = ToastData(message: "Bank: \(optimisticRemaining) left", icon: delta > 0 ? "plus.circle.fill" : "minus.circle.fill")
 
+        let kind = delta > 0 ? "adjustment" : "usage"
+        let title = delta > 0 ? "Manual Adjustment" : "Session Used"
+        let localID = UUID()
+        let localEntry = LedgerEntry(
+            id: localID,
+            date: Date(),
+            title: title,
+            delta: delta,
+            amount: nil,
+            kind: delta > 0 ? .adjustment : .sessionUsed
+        )
+        profile.addLedgerEntry(localEntry, for: client.id)
+
         Task { @MainActor in
             guard let token = AuthStore.accessToken else {
-                clientStore.adjustSessionsRemaining(by: -delta, for: client.id)
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                    clientStore.adjustSessionsRemaining(by: -delta, for: client.id)
+                }
+                profile.resolveLedgerEntry(localID: localID, with: nil, for: client.id)
                 return
             }
-            let kind = delta > 0 ? "adjustment" : "usage"
-            let title = delta > 0 ? "Manual Adjustment" : "Session Used"
             do {
                 let event = try await VerraAPI.createFinancialEvent(
                     VerraAPI.CreateFinancialEventBody(
@@ -465,10 +510,7 @@ struct ClientFinancialsView: View {
                     ),
                     accessToken: token
                 )
-                if let dto = try? await VerraAPI.fetchClients(accessToken: token).first(where: { $0.id == client.id }) {
-                    clientStore.applyClientDTO(dto)
-                }
-                let entry = LedgerEntry(
+                let confirmed = LedgerEntry(
                     id: event.id,
                     date: event.occurredAt,
                     title: event.title,
@@ -476,10 +518,12 @@ struct ClientFinancialsView: View {
                     amount: event.amount,
                     kind: delta > 0 ? .adjustment : .sessionUsed
                 )
-                profile.addLedgerEntry(entry, for: client.id)
+                profile.resolveLedgerEntry(localID: localID, with: confirmed, for: client.id)
             } catch {
-                // Roll back the optimistic change since the server never confirmed it.
-                clientStore.adjustSessionsRemaining(by: -delta, for: client.id)
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                    clientStore.adjustSessionsRemaining(by: -delta, for: client.id)
+                }
+                profile.resolveLedgerEntry(localID: localID, with: nil, for: client.id)
                 toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.circle.fill")
             }
         }
@@ -490,13 +534,28 @@ struct ClientFinancialsView: View {
         let price = Double(priceText) ?? 0
         guard count > 0 else { return }
 
-        // Optimistic bump — the calculator input is cleared right away too.
-        clientStore.adjustSessionsRemaining(by: count, for: client.id)
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+            clientStore.adjustSessionsRemaining(by: count, for: client.id)
+        }
         toast = ToastData(message: "Added \(count) sessions", icon: "plus.circle.fill")
+
+        let localID = UUID()
+        let localEntry = LedgerEntry(
+            id: localID,
+            date: Date(),
+            title: "Package Added",
+            delta: count,
+            amount: price > 0 ? price : nil,
+            kind: .packageAdded
+        )
+        profile.addLedgerEntry(localEntry, for: client.id)
 
         Task { @MainActor in
             guard let token = AuthStore.accessToken else {
-                clientStore.adjustSessionsRemaining(by: -count, for: client.id)
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                    clientStore.adjustSessionsRemaining(by: -count, for: client.id)
+                }
+                profile.resolveLedgerEntry(localID: localID, with: nil, for: client.id)
                 return
             }
             do {
@@ -511,10 +570,7 @@ struct ClientFinancialsView: View {
                     ),
                     accessToken: token
                 )
-                if let dto = try? await VerraAPI.fetchClients(accessToken: token).first(where: { $0.id == client.id }) {
-                    clientStore.applyClientDTO(dto)
-                }
-                let entry = LedgerEntry(
+                let confirmed = LedgerEntry(
                     id: event.id,
                     date: event.occurredAt,
                     title: event.title,
@@ -522,10 +578,12 @@ struct ClientFinancialsView: View {
                     amount: event.amount,
                     kind: .packageAdded
                 )
-                profile.addLedgerEntry(entry, for: client.id)
+                profile.resolveLedgerEntry(localID: localID, with: confirmed, for: client.id)
             } catch {
-                // Roll back the optimistic bump since the server never confirmed it.
-                clientStore.adjustSessionsRemaining(by: -count, for: client.id)
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                    clientStore.adjustSessionsRemaining(by: -count, for: client.id)
+                }
+                profile.resolveLedgerEntry(localID: localID, with: nil, for: client.id)
                 toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.circle.fill")
             }
         }

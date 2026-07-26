@@ -134,10 +134,10 @@ struct ClientDashboardView: View {
     // MARK: Biometrics (read-only)
 
     private func biometrics(_ client: Client) -> some View {
-        let start = client.weightKg.map { String(format: "%.0f %@", unit.fromKg(Double($0)), unit.short) } ?? "—"
+        let start = client.weightKg.map { unit.format(Double($0), fractionDigits: unit == .lbs ? 1 : 0) } ?? "—"
         let goalKg = client.goalWeightKg.map(Double.init)
             ?? profile.weightTargets(for: client).goal
-        let goal = goalKg.map { String(format: "%.0f %@", unit.fromKg($0), unit.short) } ?? "—"
+        let goal = goalKg.map { unit.format($0, fractionDigits: unit == .lbs ? 1 : 0) } ?? "—"
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("DETAILS")

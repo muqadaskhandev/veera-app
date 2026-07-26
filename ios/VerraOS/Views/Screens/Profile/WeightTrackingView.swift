@@ -48,9 +48,9 @@ struct WeightTrackingView: View {
                 VStack(spacing: Theme.Spacing.md) {
                     trendCard
                     HStack(spacing: 8) {
-                        StatCell(label: "Start", value: String(format: "%.0f %@", startWeight, unit.short))
-                        StatCell(label: "Current", value: String(format: "%.1f %@", currentWeight, unit.short))
-                        StatCell(label: "Goal", value: String(format: "%.0f %@", goalWeight, unit.short), accent: true)
+                        StatCell(label: "Start", value: unit.format(targets.start ?? (entries.first?.kg ?? 0), fractionDigits: unit == .lbs ? 1 : 0))
+                        StatCell(label: "Current", value: unit.format(entries.last?.kg ?? 0, fractionDigits: 1))
+                        StatCell(label: "Goal", value: unit.format(targets.goal ?? 0, fractionDigits: unit == .lbs ? 1 : 0), accent: true)
                     }
                     logButton
                     historyCard
@@ -188,7 +188,7 @@ struct WeightTrackingView: View {
                                     .foregroundStyle(Theme.Color.inkMuted)
                             }
                             Spacer()
-                            Text(String(format: "%.1f %@", unit.fromKg(entry.kg), unit.short))
+                            Text(unit.format(entry.kg, fractionDigits: 1))
                                 .font(.system(size: 14, weight: .bold, design: .rounded))
                                 .foregroundStyle(Theme.Color.ink)
                         }

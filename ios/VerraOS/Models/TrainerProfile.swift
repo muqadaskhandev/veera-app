@@ -69,6 +69,30 @@ enum WeightUnit: String, Codable, CaseIterable, Identifiable {
     func toKg(_ value: Double) -> Double {
         self == .kg ? value : value * Self.kgPerLb
     }
+
+    /// Formats a kilogram value for display in this unit (e.g. "150 kg" / "330.7 lbs").
+    func format(_ kg: Double, fractionDigits: Int = 1) -> String {
+        "\(formatNumber(fromKg(kg), fractionDigits: fractionDigits)) \(short)"
+    }
+
+    /// Formats a kilogram delta for display in this unit (e.g. "+5 kg" / "−11.0 lbs").
+    func formatDelta(_ deltaKg: Double, fractionDigits: Int = 1) -> String {
+        let converted = fromKg(deltaKg)
+        let sign = converted > 0 ? "+" : (converted < 0 ? "−" : "")
+        return "\(sign)\(formatNumber(abs(converted), fractionDigits: fractionDigits)) \(short)"
+    }
+
+    /// Digits-only string for text fields (no unit suffix).
+    func formatField(_ kg: Double, fractionDigits: Int = 1) -> String {
+        formatNumber(fromKg(kg), fractionDigits: fractionDigits)
+    }
+
+    private func formatNumber(_ value: Double, fractionDigits: Int) -> String {
+        if fractionDigits == 0 || value.truncatingRemainder(dividingBy: 1) == 0 {
+            return String(Int(value.rounded()))
+        }
+        return String(format: "%.\(fractionDigits)f", value)
+    }
 }
 
 /// The full set of specialty tags a trainer can advertise on their profile.

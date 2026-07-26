@@ -71,6 +71,19 @@ struct ClientController: RouteCollection {
             note: payload.note ?? ""
         )
         try await client.save(on: req.db)
+
+        // Seed a "Package Added" ledger row whenever a client is created with a
+        // prepaid balance so Usage History → Packages is never empty for them.
+        let startingSessions = payload.sessionsRemaining ?? 0
+        if startingSessions > 0 {
+            try await FinancialService.recordInitialPackage(
+                client: client,
+                trainerID: try trainer.requireID(),
+                sessionsRemaining: startingSessions,
+                on: req.db
+            )
+        }
+
         return try await ClientDTO.make(from: client, on: req.db)
     }
 

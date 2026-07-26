@@ -352,7 +352,21 @@ final class ProfileStore {
 
     func addLedgerEntry(_ entry: LedgerEntry, for id: UUID) {
         var entries = ledgerStore[id] ?? []
+        entries.removeAll { $0.id == entry.id }
         entries.insert(entry, at: 0)
+        entries.sort { $0.date > $1.date }
+        ledgerStore[id] = entries
+    }
+
+    /// Swaps a temporary optimistic row for the server-confirmed event (or
+    /// drops the temp row on failure).
+    func resolveLedgerEntry(localID: UUID, with confirmed: LedgerEntry?, for id: UUID) {
+        var entries = ledgerStore[id] ?? []
+        entries.removeAll { $0.id == localID }
+        if let confirmed {
+            entries.removeAll { $0.id == confirmed.id }
+            entries.insert(confirmed, at: 0)
+        }
         entries.sort { $0.date > $1.date }
         ledgerStore[id] = entries
     }
