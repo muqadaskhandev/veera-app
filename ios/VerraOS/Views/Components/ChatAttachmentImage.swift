@@ -106,13 +106,21 @@ enum ChatAttachmentLoader {
     }
 
     private static func downloadData(for path: String) async -> Data? {
-        guard let url = URL(string: path, relativeTo: APIConfig.baseURL),
-              let token = AuthStore.accessToken else {
-            return nil
+        // Absolute remote URLs (e.g. public S3) fetch directly; API-relative
+        // paths resolve against the configured backend and send the auth token.
+        let url: URL?
+        if path.hasPrefix("http://") || path.hasPrefix("https://") {
+            url = URL(string: path)
+        } else {
+            url = URL(string: path, relativeTo: APIConfig.baseURL)
         }
+        guard let url else { return nil }
 
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if !(path.hasPrefix("http://") || path.hasPrefix("https://")),
+           let token = AuthStore.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         request.cachePolicy = .returnCacheDataElseLoad
 
         do {

@@ -1070,13 +1070,19 @@ enum VerraAPI {
         try await APIClient.shared.request("/api/clients/\(clientID.uuidString)/photos", token: accessToken)
     }
 
-    static func uploadProgressPhoto(clientID: UUID, imageData: Data, accessToken: String) async throws -> ProgressPhotoDTO {
+    static func uploadProgressPhoto(
+        clientID: UUID,
+        imageData: Data,
+        filename: String = "photo.jpg",
+        mimeType: String = "image/jpeg",
+        accessToken: String
+    ) async throws -> ProgressPhotoDTO {
         try await APIClient.shared.upload(
             path: "/api/clients/\(clientID.uuidString)/photos",
             fieldName: "photo",
             fileData: imageData,
-            filename: "photo.jpg",
-            mimeType: "image/jpeg",
+            filename: filename,
+            mimeType: mimeType,
             token: accessToken
         )
     }

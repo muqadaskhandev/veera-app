@@ -5,13 +5,20 @@ import Vapor
 
 enum StorageService {
     static func isS3Configured() -> Bool {
-        guard let bucket = Environment.get("S3_BUCKET"), !bucket.isEmpty else { return false }
-        return Environment.get("AWS_ACCESS_KEY_ID") != nil
+        guard let bucket = Environment.get("S3_BUCKET")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !bucket.isEmpty else { return false }
+        guard let accessKey = Environment.get("AWS_ACCESS_KEY_ID")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !accessKey.isEmpty else { return false }
+        guard let secretKey = Environment.get("AWS_SECRET_ACCESS_KEY")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !secretKey.isEmpty else { return false }
+        return true
     }
 
     static func publicURL(for key: String, baseURL: String?) -> String? {
         guard !key.isEmpty else { return nil }
         if key.hasPrefix("http") { return key }
+        // Local API paths must stay relative so the iOS client resolves them
+        // against APIConfig.baseURL (localhost in Simulator, production elsewhere).
         if key.hasPrefix("/api/") { return key }
         if isS3Configured(), let bucket = Environment.get("S3_BUCKET"), let region = Environment.get("AWS_REGION") {
             return "https://\(bucket).s3.\(region).amazonaws.com/\(key)"
@@ -30,10 +37,16 @@ enum StorageService {
         contentType: String,
         on app: Application
     ) async throws -> String {
+        // Prefer S3 when fully configured; fall back to local disk if the
+        // upload fails so progress photos still work in local/dev.
         if isS3Configured() {
-            let key = "\(folder)/\(filename)"
-            try await uploadToS3(data: data, key: key, contentType: contentType, on: app)
-            return key
+            do {
+                let key = "\(folder)/\(filename)"
+                try await uploadToS3(data: data, key: key, contentType: contentType, on: app)
+                return key
+            } catch {
+                app.logger.warning("S3 upload failed — falling back to local storage: \(error)")
+            }
         }
         return try saveLocally(data: data, filename: filename, folder: folder, on: app)
     }

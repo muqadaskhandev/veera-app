@@ -427,19 +427,36 @@ extension ProfileStore {
     }
 
     @MainActor
-    func uploadPhoto(data: Data, for clientID: UUID) async -> Bool {
-        guard let token = AuthStore.accessToken else { return false }
-        guard let dto = try? await VerraAPI.uploadProgressPhoto(
+    func uploadPhoto(
+        data: Data,
+        filename: String = "photo.jpg",
+        mimeType: String = "image/jpeg",
+        for clientID: UUID
+    ) async throws {
+        guard let token = AuthStore.accessToken else {
+            throw APIError.server("Not signed in")
+        }
+        let dto = try await VerraAPI.uploadProgressPhoto(
             clientID: clientID,
             imageData: data,
+            filename: filename,
+            mimeType: mimeType,
             accessToken: token
-        ) else {
-            return false
-        }
+        )
         var photos = photos(for: clientID)
         photos.insert(ProgressPhoto(id: dto.id, date: dto.capturedAt, imageURL: dto.imageURL), at: 0)
         photoStore[clientID] = photos.sorted { $0.date > $1.date }
-        return true
+    }
+
+    /// Convenience for callers that only need a Bool.
+    @MainActor
+    func uploadPhoto(data: Data, for clientID: UUID) async -> Bool {
+        do {
+            try await uploadPhoto(data: data, for: clientID)
+            return true
+        } catch {
+            return false
+        }
     }
 
     @MainActor

@@ -3,20 +3,27 @@
 //  VerraOS
 //
 
+import AVFoundation
+import Photos
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ProgressPhotosView: View {
     let client: Client
     var onBack: () -> Void
 
     @Environment(ProfileStore.self) private var profile
-    @Environment(\.isReadOnly) private var isReadOnly
+    @Environment(\.openURL) private var openURL
 
     @State private var sliderPosition: CGFloat = 0.5
     @State private var toast: ToastData?
     @State private var pickerItem: PhotosPickerItem?
     @State private var isUploading = false
+    @State private var showLibraryPicker = false
+    @State private var showCamera = false
+    @State private var showPermissionAlert = false
+    @State private var permissionAlertMessage = ""
 
     /// Logged photos, newest first.
     private var photos: [ProgressPhoto] { profile.photos(for: client.id) }
@@ -28,8 +35,6 @@ struct ProgressPhotosView: View {
             ProfileTopBar(
                 title: "Progress Photos",
                 subtitle: client.name.firstWord,
-                // Clients can log their own progress photos too, same as weight —
-                // this is not gated behind isReadOnly like trainer-only editing controls.
                 trailing: AnyView(addButton),
                 onBack: onBack
             )
@@ -59,14 +64,46 @@ struct ProgressPhotosView: View {
         }
         .background(Theme.Color.background)
         .toast($toast)
+        .photosPicker(isPresented: $showLibraryPicker, selection: $pickerItem, matching: .images)
         .onChange(of: pickerItem) { _, item in
             guard let item else { return }
-            Task { await uploadPhoto(from: item) }
+            Task { await uploadFromLibrary(item) }
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPicker(mode: .photo) { capture in
+                showCamera = false
+                guard case .photo(let data)? = capture else { return }
+                Task { await uploadImageData(data, source: "camera") }
+            }
+            .ignoresSafeArea()
+        }
+        .alert("Photo Access Needed", isPresented: $showPermissionAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    openURL(url)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(permissionAlertMessage)
         }
     }
 
     private var addButton: some View {
-        PhotosPicker(selection: $pickerItem, matching: .images) {
+        Menu {
+            Button {
+                Task { await requestLibraryAndPick() }
+            } label: {
+                Label("Photo Library", systemImage: "photo.on.rectangle")
+            }
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button {
+                    Task { await requestCameraAndCapture() }
+                } label: {
+                    Label("Take Photo", systemImage: "camera")
+                }
+            }
+        } label: {
             Group {
                 if isUploading {
                     ProgressView()
@@ -80,25 +117,86 @@ struct ProgressPhotosView: View {
             .frame(width: 42, height: 42)
             .background(Theme.Color.accent, in: Circle())
         }
-        .buttonStyle(.plain)
         .disabled(isUploading)
     }
 
     @MainActor
-    private func uploadPhoto(from item: PhotosPickerItem) async {
+    private func requestLibraryAndPick() async {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        switch status {
+        case .authorized, .limited:
+            showLibraryPicker = true
+        case .denied, .restricted:
+            permissionAlertMessage = "Allow photo library access in Settings so you can upload progress photos."
+            showPermissionAlert = true
+        case .notDetermined:
+            break
+        @unknown default:
+            permissionAlertMessage = "Allow photo library access in Settings so you can upload progress photos."
+            showPermissionAlert = true
+        }
+    }
+
+    @MainActor
+    private func requestCameraAndCapture() async {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            showCamera = true
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: .video)
+            if granted {
+                showCamera = true
+            } else {
+                permissionAlertMessage = "Allow camera access in Settings so you can take progress photos."
+                showPermissionAlert = true
+            }
+        case .denied, .restricted:
+            permissionAlertMessage = "Allow camera access in Settings so you can take progress photos."
+            showPermissionAlert = true
+        @unknown default:
+            permissionAlertMessage = "Allow camera access in Settings so you can take progress photos."
+            showPermissionAlert = true
+        }
+    }
+
+    @MainActor
+    private func uploadFromLibrary(_ item: PhotosPickerItem) async {
         isUploading = true
         defer {
             isUploading = false
             pickerItem = nil
         }
-        guard let data = try? await item.loadTransferable(type: Data.self) else {
+
+        guard let data = await ProgressPhotoDataLoader.data(from: item) else {
             toast = ToastData(message: "Could not load photo", icon: "exclamationmark.triangle.fill")
             return
         }
-        if await profile.uploadPhoto(data: data, for: client.id) {
+        await uploadImageData(data, source: "library", alreadyUploading: true)
+    }
+
+    @MainActor
+    private func uploadImageData(_ data: Data, source: String, alreadyUploading: Bool = false) async {
+        if !alreadyUploading { isUploading = true }
+        defer { if !alreadyUploading { isUploading = false } }
+
+        guard let prepared = ChatMediaService.preparePhoto(from: data, maxDimension: 2000) else {
+            toast = ToastData(message: "Could not process photo", icon: "exclamationmark.triangle.fill")
+            return
+        }
+
+        do {
+            try await profile.uploadPhoto(
+                data: prepared.data,
+                filename: prepared.filename,
+                mimeType: prepared.mimeType,
+                for: client.id
+            )
             toast = ToastData(message: "Photo uploaded", icon: "photo.badge.plus")
-        } else {
-            toast = ToastData(message: "Upload failed", icon: "exclamationmark.triangle.fill")
+        } catch {
+            toast = ToastData(
+                message: error.localizedDescription.isEmpty ? "Upload failed" : error.localizedDescription,
+                icon: "exclamationmark.triangle.fill"
+            )
         }
     }
 
@@ -113,7 +211,7 @@ struct ProgressPhotosView: View {
     private var galleryCard: some View {
         SectionCard(title: "Gallery · \(photos.count) photos") {
             if photos.isEmpty {
-                Text("No photos yet — tap + to upload the first one.")
+                Text("No photos yet — tap + to upload from your library or camera.")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Theme.Color.inkMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -191,24 +289,26 @@ struct ProgressPhotosView: View {
 
     private func photoTile(_ photo: ProgressPhoto) -> some View {
         VStack(spacing: 5) {
-            Group {
-                if photo.hasRemoteImage, let url = photo.imageURL {
-                    ProgressPhotoImage(url: url)
-                        .aspectRatio(0.78, contentMode: .fill)
-                } else {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(LinearGradient(colors: [Color(hex: photo.tintHex).opacity(0.9), Color(hex: photo.tintHex).opacity(0.5)], startPoint: .top, endPoint: .bottom))
-                        .aspectRatio(0.78, contentMode: .fit)
-                        .overlay(
-                            Image(systemName: "figure.stand")
-                                .font(.system(size: 30, weight: .ultraLight))
-                                .foregroundStyle(.white.opacity(0.55))
-                        )
+            // Fixed-aspect cell: the image fills it via overlay and gets
+            // clipped, so scaledToFill can never push the grid around.
+            Color.clear
+                .aspectRatio(0.78, contentMode: .fit)
+                .overlay {
+                    if photo.hasRemoteImage, let url = photo.imageURL {
+                        ProgressPhotoImage(url: url)
+                    } else {
+                        LinearGradient(colors: [Color(hex: photo.tintHex).opacity(0.9), Color(hex: photo.tintHex).opacity(0.5)], startPoint: .top, endPoint: .bottom)
+                            .overlay(
+                                Image(systemName: "figure.stand")
+                                    .font(.system(size: 30, weight: .ultraLight))
+                                    .foregroundStyle(.white.opacity(0.55))
+                            )
+                    }
                 }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .contentShape(RoundedRectangle(cornerRadius: 12))
             .overlay(alignment: .topTrailing) {
-                if !isReadOnly, photo.hasRemoteImage {
+                if photo.hasRemoteImage {
                     Menu {
                         Button(role: .destructive) {
                             Task {
@@ -237,6 +337,41 @@ struct ProgressPhotosView: View {
     }
 }
 
+// MARK: - Robust PhotosPicker loading
+
+/// `PhotosPickerItem.loadTransferable(Data.self)` often returns nil for HEIC /
+/// limited-library assets. This loader tries several representations.
+enum ProgressPhotoDataLoader {
+    static func data(from item: PhotosPickerItem) async -> Data? {
+        if let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty {
+            return data
+        }
+        if let photo = try? await item.loadTransferable(type: ProgressPhotoTransfer.self) {
+            return photo.data
+        }
+        return nil
+    }
+}
+
+private struct ProgressPhotoTransfer: Transferable {
+    let data: Data
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(importedContentType: .image) { data in
+            ProgressPhotoTransfer(data: data)
+        }
+        DataRepresentation(importedContentType: .jpeg) { data in
+            ProgressPhotoTransfer(data: data)
+        }
+        DataRepresentation(importedContentType: .heic) { data in
+            ProgressPhotoTransfer(data: data)
+        }
+        DataRepresentation(importedContentType: .png) { data in
+            ProgressPhotoTransfer(data: data)
+        }
+    }
+}
+
 private struct ProgressPhotoImage: View {
     let url: String
     var label: String?
@@ -246,9 +381,16 @@ private struct ProgressPhotoImage: View {
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
+                // GeometryReader pins the image to the container's exact size
+                // so scaledToFill overflow is clipped instead of stretching
+                // the surrounding layout (grid cells stay aligned).
+                GeometryReader { geo in
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                }
             } else {
                 ZStack {
                     Theme.Color.surfaceMuted
