@@ -33,6 +33,7 @@ struct EditProfileView: View {
                     fieldSection
                     bioSection
                     specialtySection
+                    primaryCoachingFocusSection
                     onboardingSection
                 }
                 .padding(.horizontal, Theme.Spacing.md)
@@ -171,13 +172,54 @@ struct EditProfileView: View {
         }
     }
 
+    // MARK: Primary coaching focus (same choices as onboarding)
+
+    private var primaryCoachingFocusSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                sectionLabel("Primary Coaching Focus")
+                Text("CLIENTS SEE")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(Theme.Color.accentInk)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Theme.Color.accent.opacity(0.35), in: Capsule())
+            }
+            Text("Same options from onboarding — pick one or more.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.Color.inkMuted)
+
+            if isLoadingOnboarding {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            } else {
+                FlowChips(items: CoachingFocus.allCases) { focus in
+                    let selected = selectedFocus.contains(focus.rawValue)
+                    SpecialtyChip(label: focus.rawValue, selected: selected) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            if selected { selectedFocus.remove(focus.rawValue) }
+                            else { selectedFocus.insert(focus.rawValue) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Onboarding answers
+
+    /// Keys shown under Coaching details (focus lives in the main section above).
+    private var coachingDetailKeys: [String] {
+        TrainerOnboardingFields.editableKeys.filter { $0 != TrainerOnboardingFields.focus }
+    }
 
     private var onboardingSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 sectionLabel("Coaching details")
-                Text("Same answers from onboarding. Experience, location, and focus are visible to clients.")
+                Text("Same answers from onboarding. Experience and location are visible to clients.")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.Color.inkMuted)
             }
@@ -187,7 +229,7 @@ struct EditProfileView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
             } else {
-                ForEach(TrainerOnboardingFields.editableKeys, id: \.self) { key in
+                ForEach(coachingDetailKeys, id: \.self) { key in
                     onboardingField(for: key)
                 }
             }
@@ -221,23 +263,11 @@ struct EditProfileView: View {
                 }
             }
 
-            if TrainerOnboardingFields.allowsMultiple(key) {
-                FlowChips(items: options.map { IdentifiedString($0) }) { item in
-                    let selected = selectedFocus.contains(item.value)
-                    SpecialtyChip(label: item.value, selected: selected) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            if selected { selectedFocus.remove(item.value) }
-                            else { selectedFocus.insert(item.value) }
-                        }
-                    }
-                }
-            } else {
-                FlowChips(items: options.map { IdentifiedString($0) }) { item in
-                    let selected = isOptionSelected(key: key, option: item.value)
-                    SpecialtyChip(label: item.value, selected: selected) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            selectSingle(key: key, option: item.value)
-                        }
+            FlowChips(items: options.map { IdentifiedString($0) }) { item in
+                let selected = isOptionSelected(key: key, option: item.value)
+                SpecialtyChip(label: item.value, selected: selected) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        selectSingle(key: key, option: item.value)
                     }
                 }
             }
@@ -287,7 +317,11 @@ struct EditProfileView: View {
             let response = try await VerraAPI.fetchTrainerOnboarding(accessToken: token)
             await MainActor.run {
                 onboardingAnswers = response.answers
-                selectedFocus = Set(TrainerOnboardingFields.focusList(from: response.answers))
+                let focus = TrainerOnboardingFields.focusList(from: response.answers)
+                selectedFocus = Set(focus)
+                draft.coachingFocus = focus
+                draft.experience = response.answers[TrainerOnboardingFields.tenure]
+                draft.trainingLocation = response.answers[TrainerOnboardingFields.location]
                 let referral = response.answers[TrainerOnboardingFields.referral] ?? ""
                 if !referral.isEmpty, !TrainerOnboardingFields.referralOptions.contains(referral) {
                     referralOtherText = referral
@@ -308,6 +342,9 @@ struct EditProfileView: View {
         isSaving = true
         defer { isSaving = false }
         do {
+            draft.coachingFocus = selectedFocus.sorted()
+            draft.experience = onboardingAnswers[TrainerOnboardingFields.tenure]
+            draft.trainingLocation = onboardingAnswers[TrainerOnboardingFields.location]
             store.profile = draft
             try await store.saveToServer(avatarUpload: pendingAvatarData)
             pendingAvatarData = nil

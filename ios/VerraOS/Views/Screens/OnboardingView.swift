@@ -1179,12 +1179,12 @@ struct OnboardingView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
                 headlineText([
-                    Seg("Set up your "),
-                    Seg("public profile", accent: true),
+                    Seg("Complete your "),
+                    Seg("profile", accent: true),
                 ], size: 30)
                 .padding(.top, 8)
 
-                Text("This is how clients will see you. You can always edit it later.")
+                Text("Same details as Edit Profile — display name, title, bio, and specialties. Clients see this; you can change it anytime.")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(.white.opacity(0.7))
                     .padding(.top, 12)
@@ -1192,7 +1192,7 @@ struct OnboardingView: View {
                 VStack(spacing: 14) {
                     registerField("Display name", text: $profileDisplayName)
                     registerField("Job title", text: $profileJobTitle)
-                    multilineField("Short bio", text: $profileBio)
+                    multilineField("Bio", text: $profileBio)
                 }
                 .padding(.top, 28)
 
@@ -1201,6 +1201,11 @@ struct OnboardingView: View {
                     .tracking(1)
                     .foregroundStyle(.white.opacity(0.5))
                     .padding(.top, 28)
+
+                Text("Tap to select — same pills as Edit Profile.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .padding(.top, 6)
 
                 FlowChips(items: Specialty.allCases) { specialty in
                     let selected = profileSpecialties.contains(specialty)

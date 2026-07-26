@@ -59,7 +59,7 @@ enum TrainerOnboardingFields {
         case tenure: return "Experience"
         case location: return "Where you train"
         case clients: return "Active clients"
-        case focus: return "Coaching focus"
+        case focus: return "Primary Coaching Focus"
         case referral: return "How you found Verra"
         default: return key.capitalized
         }
