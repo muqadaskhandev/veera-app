@@ -990,12 +990,20 @@ enum VerraAPI {
         try await APIClient.shared.request("/api/clients/\(clientID.uuidString)/weight", token: accessToken)
     }
 
-    static func logWeight(clientID: UUID, kg: Double, accessToken: String) async throws -> WeightLogDTO {
-        struct Body: Encodable { let kg: Double }
+    static func logWeight(
+        clientID: UUID,
+        kg: Double,
+        recordedAt: Date? = nil,
+        accessToken: String
+    ) async throws -> WeightLogDTO {
+        struct Body: Encodable {
+            let kg: Double
+            let recordedAt: Date?
+        }
         return try await APIClient.shared.request(
             "/api/clients/\(clientID.uuidString)/weight",
             method: "POST",
-            body: Body(kg: kg),
+            body: Body(kg: kg, recordedAt: recordedAt),
             token: accessToken
         )
     }

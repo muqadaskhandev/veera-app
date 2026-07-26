@@ -24,7 +24,7 @@ struct WeightTrackingView: View {
     private var unit: WeightUnit { trainer.units }
 
     private var entries: [WeightEntry] {
-        profile.weights(for: client).sorted { $0.daysAgo > $1.daysAgo }
+        profile.weights(for: client).sorted { $0.recordedAt < $1.recordedAt }
     }
     /// Logged values converted into the trainer's chosen display unit.
     private var values: [Double] { entries.map { unit.fromKg($0.kg) } }
@@ -169,49 +169,67 @@ struct WeightTrackingView: View {
         SectionCard(title: "Log History", icon: "list.bullet") {
             VStack(spacing: 0) {
                 let all = entries.reversed().map { $0 } // newest first
-                let visible = showAllHistory ? all : Array(all.prefix(historyLimit))
-                ForEach(Array(visible.enumerated()), id: \.element.id) { index, entry in
-                    HStack {
-                        Text(dateLabel(daysAgo: entry.daysAgo))
-                            .font(.system(size: 13.5, weight: .semibold))
-                            .foregroundStyle(Theme.Color.ink)
-                        Spacer()
-                        Text(String(format: "%.1f %@", unit.fromKg(entry.kg), unit.short))
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(Theme.Color.ink)
-                    }
-                    .padding(.vertical, 9)
-                    if index < visible.count - 1 {
-                        Rectangle().fill(Theme.Color.hairline).frame(height: 1)
-                    }
-                }
-                if all.count > historyLimit {
-                    Button {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                            showAllHistory.toggle()
+                if all.isEmpty {
+                    Text("No weights logged yet. Each save adds a new row — you can log more than once per day.")
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(Theme.Color.inkMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                } else {
+                    let visible = showAllHistory ? all : Array(all.prefix(historyLimit))
+                    ForEach(Array(visible.enumerated()), id: \.element.id) { index, entry in
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(dateLabel(for: entry.recordedAt))
+                                    .font(.system(size: 13.5, weight: .semibold))
+                                    .foregroundStyle(Theme.Color.ink)
+                                Text(timeLabel(for: entry.recordedAt))
+                                    .font(.system(size: 11.5, weight: .medium))
+                                    .foregroundStyle(Theme.Color.inkMuted)
+                            }
+                            Spacer()
+                            Text(String(format: "%.1f %@", unit.fromKg(entry.kg), unit.short))
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                                .foregroundStyle(Theme.Color.ink)
                         }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Text(showAllHistory ? "Show less" : "Show all \(all.count)")
-                            Image(systemName: showAllHistory ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 11, weight: .bold))
+                        .padding(.vertical, 9)
+                        if index < visible.count - 1 {
+                            Rectangle().fill(Theme.Color.hairline).frame(height: 1)
                         }
-                        .font(.system(size: 13.5, weight: .bold))
-                        .foregroundStyle(Theme.Color.accent)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 12)
-                        .padding(.bottom, 2)
                     }
-                    .buttonStyle(.plain)
+                    if all.count > historyLimit {
+                        Button {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                                showAllHistory.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(showAllHistory ? "Show less" : "Show all \(all.count)")
+                                Image(systemName: showAllHistory ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 11, weight: .bold))
+                            }
+                            .font(.system(size: 13.5, weight: .bold))
+                            .foregroundStyle(Theme.Color.accent)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 12)
+                            .padding(.bottom, 2)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }
     }
 
-    private func dateLabel(daysAgo: Int) -> String {
-        if daysAgo == 0 { return "Today" }
-        let date = Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
-        return date.formatted(.dateTime.month(.abbreviated).day())
+    private func dateLabel(for date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        return date.formatted(.dateTime.month(.abbreviated).day().year())
+    }
+
+    private func timeLabel(for date: Date) -> String {
+        date.formatted(.dateTime.hour().minute())
     }
 }
 
@@ -295,27 +313,44 @@ private struct LogWeightSheet: View {
     let unit: WeightUnit
     var onSave: (Double) -> Void
 
-    @State private var text: String
+    @State private var text: String = ""
+    @FocusState private var isFieldFocused: Bool
 
     init(current: Double, unit: WeightUnit, onSave: @escaping (Double) -> Void) {
         self.current = current
         self.unit = unit
         self.onSave = onSave
-        _text = State(initialValue: String(format: "%.1f", current))
+    }
+
+    /// Last logged value, shown only as a hint so a blank Save can't silently
+    /// duplicate the previous entry.
+    private var placeholder: String {
+        current > 0 ? String(format: "%.1f", current) : "0.0"
+    }
+
+    private var parsedValue: Double? {
+        let value = Double(text.replacingOccurrences(of: ",", with: "."))
+        guard let value, value > 0 else { return nil }
+        return value
     }
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                    Text("Today's weight")
+                    Text("New weight entry")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.Color.inkMuted)
                     HStack(spacing: 8) {
-                        TextField("0.0", text: $text)
-                            .font(.system(size: 34, weight: .bold, design: .rounded))
-                            .foregroundStyle(Theme.Color.ink)
-                            .keyboardType(.decimalPad)
+                        TextField(
+                            "",
+                            text: $text,
+                            prompt: Text(placeholder).foregroundStyle(Theme.Color.inkFaint)
+                        )
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.Color.ink)
+                        .keyboardType(.decimalPad)
+                        .focused($isFieldFocused)
                         Text(unit.short)
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(Theme.Color.inkMuted)
@@ -323,6 +358,12 @@ private struct LogWeightSheet: View {
                     .padding(Theme.Spacing.md)
                     .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
                     .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).stroke(Theme.Color.hairline, lineWidth: 1))
+
+                    if current > 0 {
+                        Text(String(format: "Last logged: %.1f %@", current, unit.short))
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(Theme.Color.inkMuted)
+                    }
                 }
                 .padding(Theme.Spacing.md)
                 .padding(.bottom, Theme.Spacing.xl)
@@ -337,18 +378,18 @@ private struct LogWeightSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        if let kg = Double(text.replacingOccurrences(of: ",", with: ".")), kg > 0 {
-                            onSave(kg)
-                        }
+                        if let value = parsedValue { onSave(value) }
                         dismiss()
                     }
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(Theme.Color.ink)
+                    .disabled(parsedValue == nil)
                 }
             }
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+        .onAppear { isFieldFocused = true }
     }
 }
 

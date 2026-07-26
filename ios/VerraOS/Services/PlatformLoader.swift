@@ -199,15 +199,20 @@ enum PlatformLoader {
     }
 
     @MainActor
-    static func applyWeightLogs(_ logs: [VerraAPI.WeightLogDTO], for clientID: UUID, to profile: ProfileStore) {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let entries = logs.map { log -> WeightEntry in
-            let day = calendar.startOfDay(for: log.recordedAt)
-            let daysAgo = calendar.dateComponents([.day], from: day, to: today).day ?? 0
-            return WeightEntry(id: log.id, daysAgo: daysAgo, kg: log.kg)
+    static func applyWeightLogs(
+        _ logs: [VerraAPI.WeightLogDTO],
+        for clientID: UUID,
+        preservingLocalIDs: Set<UUID> = [],
+        to profile: ProfileStore
+    ) {
+        let server = logs.map { log in
+            WeightEntry(id: log.id, recordedAt: log.recordedAt, kg: log.kg)
         }
-        .sorted { $0.daysAgo > $1.daysAgo }
+        let serverIDs = Set(server.map(\.id))
+        let pendingLocals = profile.weightEntries(for: clientID).filter {
+            preservingLocalIDs.contains($0.id) && !serverIDs.contains($0.id)
+        }
+        let entries = (server + pendingLocals).sorted { $0.recordedAt < $1.recordedAt }
         profile.replaceWeightLogs(entries, for: clientID)
     }
 

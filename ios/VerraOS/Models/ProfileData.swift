@@ -62,14 +62,29 @@ enum ProfileModule: String, CaseIterable, Identifiable, Hashable {
 
 struct WeightEntry: Identifiable, Hashable {
     let id: UUID
-    /// Days before today (0 = today).
-    var daysAgo: Int
+    /// Exact time this weight was logged (used for history ordering and labels).
+    var recordedAt: Date
     var kg: Double
 
+    /// Days before today (0 = today). Derived from `recordedAt`.
+    var daysAgo: Int {
+        let calendar = Calendar.current
+        let day = calendar.startOfDay(for: recordedAt)
+        let today = calendar.startOfDay(for: Date())
+        return calendar.dateComponents([.day], from: day, to: today).day ?? 0
+    }
+
+    init(id: UUID = UUID(), recordedAt: Date = Date(), kg: Double) {
+        self.id = id
+        self.recordedAt = recordedAt
+        self.kg = kg
+    }
+
+    /// Convenience for callers that only know a day offset (e.g. demos).
     init(id: UUID = UUID(), daysAgo: Int, kg: Double) {
         self.id = id
-        self.daysAgo = daysAgo
         self.kg = kg
+        self.recordedAt = Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
     }
 }
 

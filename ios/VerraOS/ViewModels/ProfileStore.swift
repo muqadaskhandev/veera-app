@@ -32,8 +32,10 @@ final class ProfileStore {
     /// edits happened while it was running so its stale echo isn't applied.
     private var workoutEditGenerations: [String: Int] = [:]
     private var nutritionPersistTasks: [UUID: Task<Void, Never>] = [:]
-    private var weightPersistTasks: [UUID: Task<Void, Never>] = [:]
+    private var weightTargetPersistTasks: [UUID: Task<Void, Never>] = [:]
     private var moduleVisibilityPersistTasks: [UUID: Task<Void, Never>] = [:]
+    /// Optimistic weight rows waiting for a successful POST (keyed by local entry id).
+    private var pendingWeightEntryIDs: [UUID: Set<UUID>] = [:]
 
     // MARK: Module visibility
 
@@ -101,18 +103,31 @@ final class ProfileStore {
 
     /// Pure read: logged entries only — empty until the client logs a weight.
     func weights(for client: Client) -> [WeightEntry] {
-        weightStore[client.id] ?? []
+        weightEntries(for: client.id)
     }
 
-    /// Logs a new weight entry. Always appends — even if a value was already
-    /// logged today — so intra-day re-logs (e.g. morning vs. evening) each
-    /// keep their own place in the history instead of overwriting one another.
+    func weightEntries(for id: UUID) -> [WeightEntry] {
+        weightStore[id] ?? []
+    }
+
+    /// Logs a new weight entry. Always appends a distinct history row with its
+    /// own timestamp — never replaces an earlier log (same day or otherwise).
     func logWeight(_ kg: Double, for client: Client) {
-        var entries = weights(for: client)
         let rounded = (kg * 10).rounded() / 10
-        entries.append(WeightEntry(daysAgo: 0, kg: rounded))
+        let recordedAt = Date()
+        let entry = WeightEntry(recordedAt: recordedAt, kg: rounded)
+        var entries = weights(for: client)
+        entries.append(entry)
         weightStore[client.id] = entries
-        scheduleWeightPersist(kg: rounded, for: client)
+
+        var pending = pendingWeightEntryIDs[client.id] ?? []
+        pending.insert(entry.id)
+        pendingWeightEntryIDs[client.id] = pending
+
+        // Each log gets its own upload task — never cancel a prior log's POST.
+        Task { @MainActor in
+            await persistWeightEntry(entry, for: client)
+        }
     }
 
     func weightTargets(for client: Client) -> WeightTargets {
@@ -388,7 +403,13 @@ extension ProfileStore {
         case .weight:
             applyWeightTargets(from: client)
             if let logs = try? await VerraAPI.fetchWeightLogs(clientID: client.id, accessToken: token) {
-                PlatformLoader.applyWeightLogs(logs, for: client.id, to: self)
+                // Don't wipe optimistic rows that haven't finished uploading yet.
+                PlatformLoader.applyWeightLogs(
+                    logs,
+                    for: client.id,
+                    preservingLocalIDs: pendingWeightEntryIDs[client.id] ?? [],
+                    to: self
+                )
             }
         case .nutrition:
             if let dto = try? await VerraAPI.fetchNutrition(clientID: client.id, accessToken: token) {
@@ -492,20 +513,38 @@ extension ProfileStore {
         }
     }
 
-    func scheduleWeightPersist(kg: Double, for client: Client) {
-        weightPersistTasks[client.id]?.cancel()
-        weightPersistTasks[client.id] = Task { @MainActor in
-            guard let token = AuthStore.accessToken else { return }
-            _ = try? await VerraAPI.logWeight(clientID: client.id, kg: kg, accessToken: token)
-            if let logs = try? await VerraAPI.fetchWeightLogs(clientID: client.id, accessToken: token) {
-                PlatformLoader.applyWeightLogs(logs, for: client.id, to: self)
+    /// Uploads one weight log. Independent of other logs — a later save never
+    /// cancels this request, so same-day entries all land in history.
+    @MainActor
+    private func persistWeightEntry(_ entry: WeightEntry, for client: Client) async {
+        defer {
+            var pending = pendingWeightEntryIDs[client.id] ?? []
+            pending.remove(entry.id)
+            pendingWeightEntryIDs[client.id] = pending.isEmpty ? nil : pending
+        }
+        guard let token = AuthStore.accessToken else { return }
+        do {
+            let dto = try await VerraAPI.logWeight(
+                clientID: client.id,
+                kg: entry.kg,
+                recordedAt: entry.recordedAt,
+                accessToken: token
+            )
+            var entries = weights(for: client)
+            if let index = entries.firstIndex(where: { $0.id == entry.id }) {
+                entries[index] = WeightEntry(id: dto.id, recordedAt: dto.recordedAt, kg: dto.kg)
+            } else if !entries.contains(where: { $0.id == dto.id }) {
+                entries.append(WeightEntry(id: dto.id, recordedAt: dto.recordedAt, kg: dto.kg))
             }
+            weightStore[client.id] = entries.sorted { $0.recordedAt < $1.recordedAt }
+        } catch {
+            // Keep the optimistic row visible; a later refresh/retry can sync.
         }
     }
 
     func scheduleWeightTargetPersist(start: Double?, goal: Double?, for client: Client) {
-        weightPersistTasks[client.id]?.cancel()
-        weightPersistTasks[client.id] = Task { @MainActor in
+        weightTargetPersistTasks[client.id]?.cancel()
+        weightTargetPersistTasks[client.id] = Task { @MainActor in
             guard let token = AuthStore.accessToken else { return }
             let goalKg = goal.map { Int($0.rounded()) }
             _ = try? await VerraAPI.updateClient(

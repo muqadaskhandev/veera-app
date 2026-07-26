@@ -38,15 +38,25 @@ func configure(_ app: Application) async throws {
         postgresTLS = .disable
     }
 
+    // Keep the Fluent pool small — Supabase session-mode pooler (port 5432)
+    // caps concurrent clients (often ~15 on free/pro). Multiple local backends
+    // or a large per-event-loop pool exhaust that limit and surface as PSQLError.
+    let maxConnectionsPerEventLoop = Environment.get("DATABASE_MAX_CONNECTIONS_PER_EVENT_LOOP")
+        .flatMap(Int.init(_:)) ?? 1
+
     app.databases.use(
-        DatabaseConfigurationFactory.postgres(configuration: .init(
-            hostname: hostname,
-            port: port,
-            username: username,
-            password: password,
-            database: database,
-            tls: postgresTLS
-        )),
+        DatabaseConfigurationFactory.postgres(
+            configuration: .init(
+                hostname: hostname,
+                port: port,
+                username: username,
+                password: password,
+                database: database,
+                tls: postgresTLS
+            ),
+            maxConnectionsPerEventLoop: maxConnectionsPerEventLoop,
+            connectionPoolTimeout: .seconds(10)
+        ),
         as: .psql
     )
 
