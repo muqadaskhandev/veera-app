@@ -7,6 +7,9 @@ extension Notification.Name {
     static let refreshNotifications = Notification.Name("verra.refreshNotifications")
     /// Fired when a chat message arrives while the user is outside that thread.
     static let incomingChatAlert = Notification.Name("verra.incomingChatAlert")
+    /// Posted whenever a package, usage, or credit is written so the trainer
+    /// Financials tab can refresh without waiting for a manual pull.
+    static let financialsDidChange = Notification.Name("verra.financialsDidChange")
 }
 
 enum ChatNotificationRouter {

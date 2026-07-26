@@ -489,6 +489,7 @@ struct ClientFinancialsView: View {
             kind: delta > 0 ? .adjustment : .sessionUsed
         )
         profile.addLedgerEntry(localEntry, for: client.id)
+        NotificationCenter.default.post(name: .financialsDidChange, object: nil)
 
         Task { @MainActor in
             guard let token = AuthStore.accessToken else {
@@ -496,6 +497,7 @@ struct ClientFinancialsView: View {
                     clientStore.adjustSessionsRemaining(by: -delta, for: client.id)
                 }
                 profile.resolveLedgerEntry(localID: localID, with: nil, for: client.id)
+                NotificationCenter.default.post(name: .financialsDidChange, object: nil)
                 return
             }
             do {
@@ -519,11 +521,13 @@ struct ClientFinancialsView: View {
                     kind: delta > 0 ? .adjustment : .sessionUsed
                 )
                 profile.resolveLedgerEntry(localID: localID, with: confirmed, for: client.id)
+                NotificationCenter.default.post(name: .financialsDidChange, object: nil)
             } catch {
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                     clientStore.adjustSessionsRemaining(by: -delta, for: client.id)
                 }
                 profile.resolveLedgerEntry(localID: localID, with: nil, for: client.id)
+                NotificationCenter.default.post(name: .financialsDidChange, object: nil)
                 toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.circle.fill")
             }
         }
@@ -549,6 +553,7 @@ struct ClientFinancialsView: View {
             kind: .packageAdded
         )
         profile.addLedgerEntry(localEntry, for: client.id)
+        NotificationCenter.default.post(name: .financialsDidChange, object: nil)
 
         Task { @MainActor in
             guard let token = AuthStore.accessToken else {
@@ -556,6 +561,7 @@ struct ClientFinancialsView: View {
                     clientStore.adjustSessionsRemaining(by: -count, for: client.id)
                 }
                 profile.resolveLedgerEntry(localID: localID, with: nil, for: client.id)
+                NotificationCenter.default.post(name: .financialsDidChange, object: nil)
                 return
             }
             do {
@@ -579,11 +585,13 @@ struct ClientFinancialsView: View {
                     kind: .packageAdded
                 )
                 profile.resolveLedgerEntry(localID: localID, with: confirmed, for: client.id)
+                NotificationCenter.default.post(name: .financialsDidChange, object: nil)
             } catch {
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                     clientStore.adjustSessionsRemaining(by: -count, for: client.id)
                 }
                 profile.resolveLedgerEntry(localID: localID, with: nil, for: client.id)
+                NotificationCenter.default.post(name: .financialsDidChange, object: nil)
                 toast = ToastData(message: error.localizedDescription, icon: "exclamationmark.circle.fill")
             }
         }

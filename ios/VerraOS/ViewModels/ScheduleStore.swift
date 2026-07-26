@@ -539,6 +539,7 @@ final class ScheduleStore {
         }
         SessionReminderService.cancelReminder(for: session.id)
         persistPatch(sessions[index])
+        NotificationCenter.default.post(name: .financialsDidChange, object: nil)
     }
 
     /// Removes a cancelled session from the timeline.
@@ -553,6 +554,7 @@ final class ScheduleStore {
     /// deducts it from the client's balance — in both this store and the shared
     /// client roster — so the "sessions left" count stays accurate automatically.
     func reconcilePastSessions(clientStore: ClientStore) {
+        var didChange = false
         for index in sessions.indices {
             let session = sessions[index]
             guard !session.isCompleted,
@@ -566,6 +568,10 @@ final class ScheduleStore {
             clientStore.deductSession(forName: session.clientName)
             SessionReminderService.cancelReminder(for: session.id)
             persistPatch(sessions[index])
+            didChange = true
+        }
+        if didChange {
+            NotificationCenter.default.post(name: .financialsDidChange, object: nil)
         }
     }
 

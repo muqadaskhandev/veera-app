@@ -25,21 +25,40 @@ struct FinancialsView: View {
 
     // MARK: Derived data
 
-    /// Financial events from the API plus consult comps from the schedule, newest first.
+    /// Financial events from the API, live per-client ledgers, and consult
+    /// comps from the schedule — merged by id so client-tab package adds show
+    /// up here immediately.
     private var allEvents: [FinEvent] {
-        var events = serverEvents
+        var byID: [UUID: FinEvent] = [:]
+
+        for event in serverEvents {
+            byID[event.id] = event
+        }
+
+        // Overlay entries from each client's Financials ledger. Optimistic
+        // local rows appear before the next API round-trip; confirmed rows
+        // keep the dashboard in sync even if the summary filter is narrow.
+        for client in clientStore.clients {
+            for entry in profile.ledgerSnapshot(for: client) {
+                if let mapped = FinEvent.from(ledger: entry, clientName: client.name) {
+                    byID[mapped.id] = mapped
+                }
+            }
+        }
 
         for session in schedule.sessions where session.accent == .consult {
-            events.append(FinEvent(
+            let event = FinEvent(
+                id: session.id,
                 date: session.scheduledAt,
                 clientName: session.clientName,
                 detail: "Consult",
                 amount: 0,
                 kind: .comp
-            ))
+            )
+            byID[event.id] = event
         }
 
-        return events.sorted { $0.date > $1.date }
+        return byID.values.sorted { $0.date > $1.date }
     }
 
     private var filteredEvents: [FinEvent] {
@@ -92,7 +111,10 @@ struct FinancialsView: View {
             }
         }
         .task { await refresh() }
-        .onChange(of: filter) { _, _ in
+        .onAppear {
+            Task { await refresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .financialsDidChange)) { _ in
             Task { await refresh() }
         }
         .refreshable { await refresh() }
@@ -327,6 +349,10 @@ struct FinancialsView: View {
             Text("1 Session")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.Color.inkMuted)
+        case .credit:
+            Text(event.detail.contains("+") ? "Credit" : "Adjust")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(hex: 0xE8893C))
         case .comp:
             Text("$0 Free")
                 .font(.system(size: 13, weight: .semibold))
@@ -352,8 +378,11 @@ struct FinancialsView: View {
         await schedule.refreshFromServer()
 
         do {
+            // Always fetch the unfiltered ledger for local client sync, then
+            // let the UI time filter trim the scoreboard. This keeps each
+            // client's Financials history intact when the tab filter is Week/Month.
             let summary = try await VerraAPI.fetchFinancialSummary(
-                filter: filter.apiFilter,
+                filter: "all",
                 accessToken: token
             )
             PlatformLoader.applyFinancialEvents(summary.events, clients: clientStore.clients, to: profile)
@@ -368,27 +397,8 @@ struct FinancialsView: View {
         var events: [FinEvent] = []
         for client in clientStore.clients {
             for entry in profile.ledgerSnapshot(for: client) {
-                switch entry.kind {
-                case .packageAdded:
-                    events.append(FinEvent(
-                        id: entry.id,
-                        date: entry.date,
-                        clientName: client.name,
-                        detail: "bought \(entry.delta)-Pack",
-                        amount: entry.amount,
-                        kind: .income
-                    ))
-                case .sessionUsed:
-                    events.append(FinEvent(
-                        id: entry.id,
-                        date: entry.date,
-                        clientName: client.name,
-                        detail: "Session Used",
-                        amount: nil,
-                        kind: .usage
-                    ))
-                case .adjustment:
-                    continue
+                if let mapped = FinEvent.from(ledger: entry, clientName: client.name) {
+                    events.append(mapped)
                 }
             }
         }

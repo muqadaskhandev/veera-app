@@ -138,6 +138,18 @@ enum PlatformLoader {
                     amount: nil,
                     kind: .usage
                 )
+            case "adjustment":
+                let detail = dto.sessionDelta > 0
+                    ? "Manual credit (+\(dto.sessionDelta))"
+                    : (dto.sessionDelta < 0 ? "Manual adjustment (\(dto.sessionDelta))" : dto.title)
+                return FinEvent(
+                    id: dto.id,
+                    date: dto.occurredAt,
+                    clientName: clientName,
+                    detail: detail,
+                    amount: dto.amount,
+                    kind: .credit
+                )
             default:
                 return nil
             }

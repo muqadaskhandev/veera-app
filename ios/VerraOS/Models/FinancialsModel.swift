@@ -54,12 +54,14 @@ enum FinTimeFilter: String, CaseIterable, Identifiable {
 enum FinEventKind: Equatable {
     case income
     case usage
+    case credit
     case comp
 
     var tint: Color {
         switch self {
         case .income: return Color(hex: 0x57C77B)
         case .usage: return Theme.Color.inkMuted
+        case .credit: return Color(hex: 0xE8893C)
         case .comp: return Theme.Color.inkFaint
         }
     }
@@ -68,6 +70,7 @@ enum FinEventKind: Equatable {
         switch self {
         case .income: return "plus.circle.fill"
         case .usage: return "minus.circle.fill"
+        case .credit: return "slider.horizontal.3"
         case .comp: return "gift.fill"
         }
     }
@@ -78,6 +81,7 @@ enum LedgerKindFilter: String, CaseIterable, Identifiable {
     case all
     case income
     case usage
+    case credit
     case comp
 
     var id: String { rawValue }
@@ -87,6 +91,7 @@ enum LedgerKindFilter: String, CaseIterable, Identifiable {
         case .all: return "All"
         case .income: return "Income"
         case .usage: return "Sessions"
+        case .credit: return "Credits"
         case .comp: return "Free / Comps"
         }
     }
@@ -97,6 +102,7 @@ enum LedgerKindFilter: String, CaseIterable, Identifiable {
         case .all: return true
         case .income: return kind == .income
         case .usage: return kind == .usage
+        case .credit: return kind == .credit
         case .comp: return kind == .comp
         }
     }
@@ -119,6 +125,43 @@ struct FinEvent: Identifiable {
         self.detail = detail
         self.amount = amount
         self.kind = kind
+    }
+
+    /// Maps a per-client ledger row into a trainer dashboard event.
+    static func from(ledger entry: LedgerEntry, clientName: String) -> FinEvent? {
+        switch entry.kind {
+        case .packageAdded:
+            let detail = entry.delta > 0 ? "bought \(entry.delta)-Pack" : entry.title
+            return FinEvent(
+                id: entry.id,
+                date: entry.date,
+                clientName: clientName,
+                detail: detail,
+                amount: entry.amount,
+                kind: .income
+            )
+        case .sessionUsed:
+            return FinEvent(
+                id: entry.id,
+                date: entry.date,
+                clientName: clientName,
+                detail: "Session Used",
+                amount: nil,
+                kind: .usage
+            )
+        case .adjustment:
+            let detail = entry.delta > 0
+                ? "Manual credit (+\(entry.delta))"
+                : "Manual adjustment (\(entry.delta))"
+            return FinEvent(
+                id: entry.id,
+                date: entry.date,
+                clientName: clientName,
+                detail: detail,
+                amount: entry.amount,
+                kind: .credit
+            )
+        }
     }
 }
 
