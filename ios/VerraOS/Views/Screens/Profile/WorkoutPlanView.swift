@@ -298,6 +298,8 @@ struct WorkoutPlanView: View {
             ForEach(Array(week.enumerated()), id: \.offset) { index, day in
                 let isSelected = index == selectedDayIndex
                 let exerciseCount = day.exercises.filter { $0.kind == .exercise }.count
+                let hasNotes = !(day.notes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+                let hasPlan = exerciseCount > 0 || day.exercises.contains(where: { $0.kind == .rest }) || hasNotes
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { selectedDayIndex = index }
                 } label: {
@@ -309,6 +311,10 @@ struct WorkoutPlanView: View {
                             Text("\(exerciseCount)")
                                 .font(.system(size: 12, weight: .bold, design: .rounded))
                                 .foregroundStyle(isSelected ? Theme.Color.accentInk : Theme.Color.ink)
+                        } else if hasPlan {
+                            Image(systemName: hasNotes ? "square.and.pencil" : "moon.zzz.fill")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(isSelected ? Theme.Color.accentInk : Theme.Color.inkMuted)
                         } else {
                             Circle()
                                 .fill(Theme.Color.inkFaint.opacity(0.45))
@@ -359,6 +365,7 @@ struct WorkoutPlanView: View {
             }
             if !isReadOnly {
                 addHeaderButton
+                saveDetailedButton
                 sessionLogCard
             }
         }
@@ -717,7 +724,12 @@ struct WorkoutPlanView: View {
         mutateSelectedDay { day in day.notes = trimmed.isEmpty ? nil : trimmed }
         sessionNotes = trimmed
         sessionNotesKey = dayKey
-        Task { await profile.flushWorkoutPersist(clientID: client.id, week: weekIndex) }
+        Task { @MainActor in
+            await profile.flushWorkoutPersist(clientID: client.id, week: weekIndex)
+            // Re-bind from store so a server echo can't leave the field blank.
+            sessionNotes = selectedDay?.notes ?? trimmed
+            sessionNotesKey = dayKey
+        }
         toast = ToastData(message: "Session logged", icon: "checkmark.circle.fill")
     }
 
@@ -731,6 +743,13 @@ struct WorkoutPlanView: View {
                     .padding(Theme.Spacing.sm)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .background(Theme.Color.surfaceMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                if let saved = selectedDay?.notes?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !saved.isEmpty,
+                   saved == sessionNotes.trimmingCharacters(in: .whitespacesAndNewlines) {
+                    Text("Saved to this day — visible in the week strip.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.Color.inkFaint)
+                }
                 Button(action: saveSessionNotes) {
                     Text("Save Log")
                         .font(.system(size: 15, weight: .bold))
@@ -743,6 +762,30 @@ struct WorkoutPlanView: View {
                 .disabled(sessionNotes.trimmingCharacters(in: .whitespaces).isEmpty)
                 .opacity(sessionNotes.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
             }
+        }
+    }
+
+    private var saveDetailedButton: some View {
+        VStack(spacing: 8) {
+            Button {
+                saveDetailedWorkout()
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 15, weight: .bold))
+                    Text("Save Workout").font(.system(size: 15, weight: .bold))
+                }
+                .foregroundStyle(Theme.Color.accentInk)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Theme.Color.accent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Save Workout")
+
+            Text("Saves this day's plan and session notes to the weekly view.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.Color.inkFaint)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 
@@ -978,14 +1021,41 @@ struct WorkoutPlanView: View {
         if !freestyleName.trimmingCharacters(in: .whitespaces).isEmpty {
             addFreestyleExercise()
         }
+        let trimmedNotes = sessionNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         mutateSelectedDay { day in
-            let trimmedNotes = sessionNotes.trimmingCharacters(in: .whitespacesAndNewlines)
             day.notes = trimmedNotes.isEmpty ? nil : trimmedNotes
             day.focus = focus.rawValue
         }
+        sessionNotes = trimmedNotes
         sessionNotesKey = dayKey
-        Task { await profile.flushWorkoutPersist(clientID: client.id, week: weekIndex) }
+        Task { @MainActor in
+            await profile.flushWorkoutPersist(clientID: client.id, week: weekIndex)
+            sessionNotes = selectedDay?.notes ?? trimmedNotes
+            sessionNotesKey = dayKey
+        }
         toast = ToastData(message: "Freestyle workout saved", icon: "checkmark.circle.fill")
+    }
+
+    private func saveDetailedWorkout() {
+        let trimmedNotes = sessionNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        mutateSelectedDay { day in
+            day.notes = trimmedNotes.isEmpty ? nil : trimmedNotes
+            if day.focus == nil || day.focus?.isEmpty == true, !day.exercises.isEmpty {
+                day.focus = "Workout"
+            }
+        }
+        sessionNotes = trimmedNotes
+        sessionNotesKey = dayKey
+        Task { @MainActor in
+            await profile.flushWorkoutPersist(clientID: client.id, week: weekIndex)
+            sessionNotes = selectedDay?.notes ?? trimmedNotes
+            sessionNotesKey = dayKey
+        }
+        let count = selectedDay?.exercises.filter { $0.kind == .exercise }.count ?? 0
+        toast = ToastData(
+            message: count > 0 ? "Workout saved (\(count) exercises)" : "Workout saved",
+            icon: "checkmark.circle.fill"
+        )
     }
 
     private func addRestDay(underHeaderID headerID: UUID) {
