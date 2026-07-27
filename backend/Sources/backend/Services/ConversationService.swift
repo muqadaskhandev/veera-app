@@ -339,14 +339,18 @@ enum ConversationService {
             : user.displayName
         let pushBody = conversation.lastMessagePreview ?? "New message"
 
-        for recipient in recipients {
-            await MessagePushService.notifyNewMessage(
-                to: recipient,
-                title: senderTitle,
-                body: pushBody,
-                conversationID: conversationID,
-                on: app
-            )
+        // Don't block the sender's HTTP response (or any waiters) on APNs.
+        // Recipients already got `message.new` over the WebSocket above.
+        Task {
+            for recipient in recipients {
+                await MessagePushService.notifyNewMessage(
+                    to: recipient,
+                    title: senderTitle,
+                    body: pushBody,
+                    conversationID: conversationID,
+                    on: app
+                )
+            }
         }
 
         return dto

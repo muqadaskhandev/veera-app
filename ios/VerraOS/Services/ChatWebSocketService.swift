@@ -5,14 +5,22 @@ final class ChatWebSocketService {
     static let shared = ChatWebSocketService()
 
     var onEvent: ((ChatEventDTO) -> Void)?
+    /// Fired after a successful reconnect so the store can catch up missed messages.
+    var onReconnect: (() -> Void)?
 
     private var task: URLSessionWebSocketTask?
     private var receiveLoopTask: Task<Void, Never>?
     private var accessToken: String?
+    private var hasConnectedOnce = false
+    private var notifyReconnectOnNextReceive = false
+
+    var isConnected: Bool { task != nil }
 
     func connect(accessToken: String) {
         disconnect()
         self.accessToken = accessToken
+        hasConnectedOnce = false
+        notifyReconnectOnNextReceive = false
         openSocket(accessToken: accessToken)
         receiveLoopTask = Task { await receiveLoop() }
     }
@@ -21,6 +29,8 @@ final class ChatWebSocketService {
         receiveLoopTask?.cancel()
         receiveLoopTask = nil
         accessToken = nil
+        hasConnectedOnce = false
+        notifyReconnectOnNextReceive = false
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
     }
@@ -55,6 +65,11 @@ final class ChatWebSocketService {
             do {
                 let message = try await task.receive()
                 backoffSeconds = 1
+                if notifyReconnectOnNextReceive {
+                    notifyReconnectOnNextReceive = false
+                    onReconnect?()
+                }
+                hasConnectedOnce = true
                 switch message {
                 case .string(let text):
                     handle(text: text)
@@ -72,6 +87,9 @@ final class ChatWebSocketService {
                 try? await Task.sleep(for: .seconds(backoffSeconds))
                 backoffSeconds = min(backoffSeconds * 2, 15)
                 guard !Task.isCancelled, let token = accessToken else { break }
+                if hasConnectedOnce {
+                    notifyReconnectOnNextReceive = true
+                }
                 openSocket(accessToken: token)
             }
         }

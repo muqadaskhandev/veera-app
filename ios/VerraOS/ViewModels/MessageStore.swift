@@ -143,15 +143,19 @@ final class MessageStore {
 
     @MainActor
     func start(accessToken: String) async {
-        // Load inbox before opening the socket so live `message.new` events
-        // aren't dropped because the conversation isn't local yet.
-        await refreshFromServer()
+        // Open the socket immediately so live events aren't delayed behind inbox load.
         ChatWebSocketService.shared.onEvent = { [weak self] event in
             Task { @MainActor in
                 self?.handle(event: event)
             }
         }
+        ChatWebSocketService.shared.onReconnect = { [weak self] in
+            Task { @MainActor in
+                await self?.catchUpAfterReconnect()
+            }
+        }
         ChatWebSocketService.shared.connect(accessToken: accessToken)
+        await refreshFromServer()
         await flushOfflineQueue()
         startPolling(accessToken: accessToken)
         await ChatPushService.registerIfNeeded()
@@ -163,6 +167,7 @@ final class MessageStore {
         pollTask = nil
         ChatWebSocketService.shared.disconnect()
         ChatWebSocketService.shared.onEvent = nil
+        ChatWebSocketService.shared.onReconnect = nil
     }
 
     @MainActor
@@ -333,7 +338,9 @@ final class MessageStore {
     @MainActor
     func ensureClientThread() async -> UUID? {
         guard let token = AuthStore.accessToken else { return conversations.first?.id }
-        await refreshFromServer()
+        if !isLoadedFromServer {
+            await refreshFromServer()
+        }
         if let existing = conversations.first {
             return existing.id
         }
@@ -571,22 +578,22 @@ final class MessageStore {
         }
     }
 
-    /// Applies a live incoming message, refreshing the inbox first when the
-    /// conversation isn't local yet (new thread / previously soft-deleted).
+    /// Applies a live incoming message immediately. Missing threads get a stub
+    /// so the bubble isn't blocked behind a full inbox refresh.
     @MainActor
     private func ingestIncomingMessage(_ dto: MessageDTO) async {
-        if conversations.first(where: { $0.id == dto.conversationID }) == nil {
-            await refreshFromServer()
-        }
+        ensureStubConversation(for: dto)
 
-        var wasNew = append(MessageLoader.message(from: dto), to: dto.conversationID)
-        if !wasNew, conversations.first(where: { $0.id == dto.conversationID }) == nil {
-            // Second chance — send restores soft-deleted threads server-side.
-            await refreshFromServer()
-            wasNew = append(MessageLoader.message(from: dto), to: dto.conversationID)
-        }
-
+        let wasNew = append(MessageLoader.message(from: dto), to: dto.conversationID)
         updatePreview(for: dto.conversationID, preview: dto.body, at: dto.createdAt ?? .now)
+
+        // Fill in client name / avatar without delaying the bubble.
+        if conversations.first(where: { $0.id == canonicalConversationID(dto.conversationID) })?.clientName == "Chat" {
+            Task { @MainActor in
+                await refreshFromServer()
+            }
+        }
+
         guard wasNew, !dto.isOutgoing else { return }
 
         let conversationID = canonicalConversationID(dto.conversationID)
@@ -610,6 +617,30 @@ final class MessageStore {
             )
             NotificationCenter.default.post(name: .refreshNotifications, object: nil)
         }
+    }
+
+    /// Creates a temporary conversation row so `append` can succeed before inbox sync.
+    @MainActor
+    private func ensureStubConversation(for dto: MessageDTO) {
+        let id = canonicalConversationID(dto.conversationID)
+        guard conversations.first(where: { $0.id == id }) == nil else { return }
+        let message = MessageLoader.message(from: dto)
+        conversations.insert(
+            Conversation(
+                id: dto.conversationID,
+                clientID: dto.conversationID,
+                clientName: "Chat",
+                initials: "?",
+                messages: [],
+                isUnread: !dto.isOutgoing,
+                unreadMessageCount: dto.isOutgoing ? 0 : 1,
+                lastActiveAt: dto.createdAt ?? .now,
+                lastMessagePreview: message.kind.preview,
+                lastMessageAt: dto.createdAt,
+                otherParticipantUserID: dto.isOutgoing ? nil : dto.senderUserID
+            ),
+            at: 0
+        )
     }
 
     @MainActor
@@ -884,7 +915,9 @@ final class MessageStore {
         pollTask?.cancel()
         pollTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(12))
+                // Poll faster while the socket is down so missed messages surface quickly.
+                let interval: Double = ChatWebSocketService.shared.isConnected ? 12 : 3
+                try? await Task.sleep(for: .seconds(interval))
                 guard !Task.isCancelled else { break }
                 await refreshFromServer()
                 // Soft-refresh the open thread only — don't re-mark-read every poll.
@@ -892,6 +925,14 @@ final class MessageStore {
                     await softReloadMessages(for: activeConversationID)
                 }
             }
+        }
+    }
+
+    @MainActor
+    private func catchUpAfterReconnect() async {
+        await refreshFromServer()
+        if let activeConversationID {
+            await softReloadMessages(for: activeConversationID)
         }
     }
 
