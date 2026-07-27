@@ -182,7 +182,6 @@ struct ClientRootView: View {
         }
         .sheet(isPresented: $showingEditDetails) {
             ClientEditDetailsSheet(account: account)
-                .environment(trainer)
         }
         .onChange(of: showingEditDetails) { _, isShowing in
             if !isShowing {
@@ -194,13 +193,12 @@ struct ClientRootView: View {
         }
         .sheet(isPresented: $showingSettings) {
             ClientSettingsView(
-                unit: trainer.units,
+                unit: account.units,
                 onSelectUnit: { newUnit in
-                    // Update both the reactive display unit and the cached
-                    // account string so a background refresh can't revert it
-                    // before the debounced server save lands.
-                    trainer.units = newUnit
-                    account.weightUnit = newUnit.rawValue
+                    Task { await account.setWeightUnit(newUnit) }
+                    // Shared module screens still read trainer.units for display —
+                    // apply locally only so we never PATCH the trainer's preference.
+                    trainer.applyDisplayUnit(newUnit)
                 },
                 onLogOut: onLogOut,
                 onDeleteAccount: onLogOut,
@@ -259,8 +257,8 @@ struct ClientRootView: View {
                   let title = info["title"] as? String,
                   let pushBody = info["body"] as? String else { return }
             let conversationID = (info["conversationID"] as? String).flatMap(UUID.init(uuidString:))
-            // Hide chat banners while already in Messages; still show account alerts (e.g. sessions).
-            if conversationID != nil, tab == .messages { return }
+            // Only hide the banner when already viewing that exact thread.
+            if let conversationID, tab == .messages, conversationID == self.conversationID { return }
             let body: String = {
                 guard conversationID != nil else { return pushBody }
                 switch title {
@@ -306,8 +304,9 @@ struct ClientRootView: View {
         guard let loaded = account.client else { return }
         clients.clients = [loaded]
         schedule.clients = [loaded]
-        trainer.profile = account.coachProfile
-        trainer.profile.weightUnit = WeightUnit(rawValue: account.weightUnit) ?? .kg
+        // Load coach card data without PATCHing preferences through TrainerStore.
+        trainer.replaceProfileWithoutSaving(account.coachProfile)
+        trainer.applyDisplayUnit(account.units)
         profile.applyWeightTargets(from: loaded)
         profile.applyVisibleModules(loaded.visibleModules, for: loaded.id)
     }

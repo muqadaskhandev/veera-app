@@ -117,7 +117,7 @@ struct ClientSettingsView: View {
                 Text("Units")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.Color.ink)
-                Text("Weight measurement unit")
+                Text("Your weight display unit")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.Color.inkMuted)
             }

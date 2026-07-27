@@ -455,9 +455,16 @@ struct StorageController: RouteCollection {
               let filename = req.parameters.get("filename") else {
             throw Abort(.badRequest)
         }
-        guard let path = StorageService.localFilePath(storedPath: filename, folder: folder, on: req.application) else {
-            throw Abort(.notFound)
+        if let path = StorageService.localFilePath(storedPath: filename, folder: folder, on: req.application) {
+            return try await req.fileio.asyncStreamFile(at: path)
         }
-        return try await req.fileio.asyncStreamFile(at: path)
+        // Private / S3 Express buckets — proxy through the API.
+        if StorageService.isS3Configured() {
+            let data = try await StorageService.fetch(key: "\(folder)/\(filename)", on: req.application)
+            var headers = HTTPHeaders()
+            headers.contentType = .binary
+            return Response(status: .ok, headers: headers, body: .init(data: data))
+        }
+        throw Abort(.notFound)
     }
 }

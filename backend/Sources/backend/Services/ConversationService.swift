@@ -249,6 +249,21 @@ enum ConversationService {
             recipientUserID: viewerID,
             on: database
         )
+        // Notify senders so their delivery ticks advance without requiring the
+        // explicit /delivered endpoint (e.g. opening a thread marks delivered).
+        for update in delivered {
+            guard let senderID = update.$senderUser.id else { continue }
+            let statusDTO = try MessageDTO(from: update, viewerUserID: senderID)
+            await ChatHub.shared.send(
+                to: senderID,
+                event: ChatEvent(
+                    type: "message.status",
+                    message: statusDTO,
+                    conversationID: conversationIDValue,
+                    messageID: update.id
+                )
+            )
+        }
         var dtos = try slice.map { try MessageDTO(from: $0, viewerUserID: viewerID) }
         for update in delivered {
             guard let id = update.id else { continue }

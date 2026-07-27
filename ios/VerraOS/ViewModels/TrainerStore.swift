@@ -136,6 +136,23 @@ final class TrainerStore {
         set { profile.weightUnit = newValue }
     }
 
+    /// Updates display unit without writing to the server. Used by the client
+    /// shell so shared weight UIs can render in the client's unit without
+    /// overwriting the trainer's (or client's) saved preference via this store.
+    func applyDisplayUnit(_ unit: WeightUnit) {
+        isApplyingServerState = true
+        profile.weightUnit = unit
+        isApplyingServerState = false
+    }
+
+    /// Replaces the in-memory profile without scheduling a preferences PATCH
+    /// (client shell loads the coach's public profile into this store for UI).
+    func replaceProfileWithoutSaving(_ newProfile: TrainerProfile) {
+        isApplyingServerState = true
+        profile = newProfile
+        isApplyingServerState = false
+    }
+
     func toggleSpecialty(_ specialty: Specialty) {
         if profile.specialties.contains(specialty) {
             profile.specialties.remove(specialty)

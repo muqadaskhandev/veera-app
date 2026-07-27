@@ -208,10 +208,36 @@ struct ConversationController: RouteCollection {
         guard let filename = req.parameters.get("filename") else {
             throw Abort(.badRequest)
         }
-        guard let path = MessageMediaService.resolvePath(filename: filename, on: req.application) else {
-            throw Abort(.notFound)
+
+        // Local disk (StorageService uploads/chat or legacy uploads/chat).
+        if let path = MessageMediaService.resolvePath(filename: filename, on: req.application) {
+            return try await req.fileio.asyncStreamFile(at: path)
         }
-        return try await req.fileio.asyncStreamFile(at: path)
+
+        // Durable S3 / S3 Express object — proxy through the API (bucket is private).
+        if StorageService.isS3Configured() {
+            let data = try await StorageService.fetch(key: "chat/\(filename)", on: req.application)
+            var headers = HTTPHeaders()
+            headers.contentType = fileContentType(for: filename)
+            return Response(status: .ok, headers: headers, body: .init(data: data))
+        }
+
+        throw Abort(.notFound)
+    }
+
+    private func fileContentType(for filename: String) -> HTTPMediaType {
+        switch filename.split(separator: ".").last?.lowercased() {
+        case "jpg", "jpeg": return .jpeg
+        case "png": return .png
+        case "gif": return .gif
+        case "webp": return HTTPMediaType(type: "image", subType: "webp")
+        case "mp4": return HTTPMediaType(type: "video", subType: "mp4")
+        case "mov": return HTTPMediaType(type: "video", subType: "quicktime")
+        case "m4a": return HTTPMediaType(type: "audio", subType: "mp4")
+        case "mp3": return HTTPMediaType(type: "audio", subType: "mpeg")
+        case "pdf": return .pdf
+        default: return .binary
+        }
     }
 
     @Sendable

@@ -7,6 +7,7 @@ struct ChatAttachmentImage: View {
     var cornerRadius: CGFloat = 20
 
     @State private var image: UIImage?
+    @State private var loadFailed = false
 
     var body: some View {
         Group {
@@ -14,42 +15,78 @@ struct ChatAttachmentImage: View {
                 if image.images != nil {
                     // SwiftUI `Image` only shows the first GIF frame — use UIKit to animate.
                     AnimatedUIImageView(image: image)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
                 }
-            } else {
+            } else if loadFailed {
                 ZStack {
                     RoundedRectangle(cornerRadius: cornerRadius)
                         .fill(Theme.Color.surfaceMuted)
-                    ProgressView()
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundStyle(Theme.Color.inkFaint)
+                        Text("Couldn't load image")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.Color.inkMuted)
+                    }
                 }
+            } else {
+                SkeletonBone(height: 180, cornerRadius: cornerRadius)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .task(id: path) {
+            loadFailed = false
             image = await ChatAttachmentLoader.image(for: path)
+            if image == nil { loadFailed = true }
         }
     }
 }
 
+/// Hosts an animated `UIImage` in a full-bounds container so SwiftUI layout
+/// doesn't collapse the UIImageView to zero size on device.
 private struct AnimatedUIImageView: UIViewRepresentable {
     let image: UIImage
 
-    func makeUIView(context: Context) -> UIImageView {
-        let view = UIImageView(image: image)
-        view.contentMode = .scaleAspectFill
-        view.clipsToBounds = true
-        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        view.setContentHuggingPriority(.defaultLow, for: .vertical)
-        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        return view
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        container.backgroundColor = .clear
+        container.clipsToBounds = true
+
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.tag = 100
+        container.addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: container.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        if image.images != nil {
+            imageView.startAnimating()
+        }
+        return container
     }
 
-    func updateUIView(_ uiView: UIImageView, context: Context) {
-        uiView.image = image
+    func updateUIView(_ uiView: UIView, context: Context) {
+        guard let imageView = uiView.viewWithTag(100) as? UIImageView else { return }
+        if imageView.image !== image {
+            imageView.image = image
+        }
+        if image.images != nil {
+            imageView.startAnimating()
+        }
+    }
+
+    static func dismantleUIView(_ uiView: UIView, coordinator: ()) {
+        (uiView.viewWithTag(100) as? UIImageView)?.stopAnimating()
     }
 }
 
@@ -62,6 +99,14 @@ enum ChatAttachmentLoader {
     /// Builds an animated `UIImage` for multi-frame GIFs; falls back to nil for
     /// still images so callers can use `UIImage(data:)`.
     static func animatedImage(from data: Data) -> UIImage? {
+        guard isGIFData(data) || looksLikeAnimatedImage(data) else {
+            // Still try ImageIO for multi-frame sources that aren't tagged GIF.
+            return decodeAnimated(from: data)
+        }
+        return decodeAnimated(from: data)
+    }
+
+    private static func decodeAnimated(from data: Data) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         let count = CGImageSourceGetCount(source)
         guard count > 1 else { return nil }
@@ -78,16 +123,39 @@ enum ChatAttachmentLoader {
         return UIImage.animatedImage(with: frames, duration: duration)
     }
 
+    static func isGIFData(_ data: Data) -> Bool {
+        guard data.count >= 6 else { return false }
+        let header = String(data: data.prefix(6), encoding: .ascii) ?? ""
+        return header == "GIF87a" || header == "GIF89a"
+    }
+
+    private static func looksLikeAnimatedImage(_ data: Data) -> Bool {
+        // WebP RIFF header — Giphy sometimes serves webp; ImageIO can still animate.
+        guard data.count >= 12 else { return false }
+        let riff = data.prefix(4)
+        let webp = data.subdata(in: 8..<12)
+        return riff == Data("RIFF".utf8) && webp == Data("WEBP".utf8)
+    }
+
     private static func frameDuration(source: CGImageSource, index: Int) -> Double {
-        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
-              let gif = properties[kCGImagePropertyGIFDictionary] as? [CFString: Any] else {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any] else {
             return 0.1
         }
-        if let unclamped = gif[kCGImagePropertyGIFUnclampedDelayTime] as? Double, unclamped > 0 {
-            return unclamped
+        if let gif = properties[kCGImagePropertyGIFDictionary] as? [CFString: Any] {
+            if let unclamped = gif[kCGImagePropertyGIFUnclampedDelayTime] as? Double, unclamped > 0 {
+                return unclamped
+            }
+            if let delay = gif[kCGImagePropertyGIFDelayTime] as? Double, delay > 0 {
+                return delay
+            }
         }
-        if let delay = gif[kCGImagePropertyGIFDelayTime] as? Double, delay > 0 {
-            return delay
+        if let webp = properties[kCGImagePropertyWebPDictionary] as? [CFString: Any] {
+            if let unclamped = webp[kCGImagePropertyWebPUnclampedDelayTime] as? Double, unclamped > 0 {
+                return unclamped
+            }
+            if let delay = webp[kCGImagePropertyWebPDelayTime] as? Double, delay > 0 {
+                return delay
+            }
         }
         return 0.1
     }
@@ -121,7 +189,7 @@ enum ChatAttachmentLoader {
            let token = AuthStore.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        request.cachePolicy = .returnCacheDataElseLoad
+        request.cachePolicy = .reloadIgnoringLocalCacheData
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)

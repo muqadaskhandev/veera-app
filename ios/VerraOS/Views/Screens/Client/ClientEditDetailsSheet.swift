@@ -9,7 +9,6 @@ import SwiftUI
 struct ClientEditDetailsSheet: View {
     @Bindable var account: ClientAccountStore
 
-    @Environment(TrainerStore.self) private var trainer
     @Environment(\.dismiss) private var dismiss
 
     @State private var draftName: String
@@ -28,7 +27,7 @@ struct ClientEditDetailsSheet: View {
     }
     @FocusState private var focusedField: Field?
 
-    private var unit: WeightUnit { trainer.units }
+    private var unit: WeightUnit { account.units }
 
     init(account: ClientAccountStore) {
         self.account = account
@@ -45,9 +44,7 @@ struct ClientEditDetailsSheet: View {
         } else {
             _heightFeet = State(initialValue: "")
         }
-        // Weight fields depend on the trainer's preferred unit, which isn't
-        // available from the environment yet inside `init` — populated in
-        // `onAppear` via `populateWeights()` instead.
+        // Weight fields use this client's unit preference — populated in onAppear.
         _startWeight = State(initialValue: "")
         _goalWeight = State(initialValue: "")
     }

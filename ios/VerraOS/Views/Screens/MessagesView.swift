@@ -117,7 +117,14 @@ struct MessagesView: View {
             .listRowInsets(EdgeInsets(top: 0, leading: Theme.Spacing.md, bottom: 0, trailing: Theme.Spacing.md))
 
             if rows.isEmpty {
-                emptyState
+                Group {
+                    if !store.isLoadedFromServer && search.isEmpty {
+                        MessagesInboxSkeleton()
+                            .padding(.top, 4)
+                    } else {
+                        emptyState
+                    }
+                }
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 0, leading: Theme.Spacing.md, bottom: 0, trailing: Theme.Spacing.md))

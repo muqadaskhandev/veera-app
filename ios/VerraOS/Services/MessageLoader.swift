@@ -150,6 +150,14 @@ struct PendingChatMessage: Codable, Identifiable {
         self.body = MessageLoader.bodyString(from: kind)
         self.attachmentURL = attachmentURL
     }
+
+    init(id: UUID, conversationID: UUID, kind: String, body: String, attachmentURL: String?) {
+        self.id = id
+        self.conversationID = conversationID
+        self.kind = kind
+        self.body = body
+        self.attachmentURL = attachmentURL
+    }
 }
 
 enum ChatOfflineQueue {
@@ -171,6 +179,22 @@ enum ChatOfflineQueue {
     static func enqueue(_ item: PendingChatMessage) {
         var items = load()
         items.append(item)
+        save(items)
+    }
+
+    static func rewriteConversationID(from oldIDs: [UUID], to newID: UUID) {
+        let old = Set(oldIDs)
+        guard !old.isEmpty else { return }
+        let items = load().map { item -> PendingChatMessage in
+            guard old.contains(item.conversationID) else { return item }
+            return PendingChatMessage(
+                id: item.id,
+                conversationID: newID,
+                kind: item.kind,
+                body: item.body,
+                attachmentURL: item.attachmentURL
+            )
+        }
         save(items)
     }
 

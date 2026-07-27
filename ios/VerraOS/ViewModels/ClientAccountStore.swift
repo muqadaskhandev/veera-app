@@ -10,9 +10,14 @@ final class ClientAccountStore {
     var client: Client?
     var coachProfile = TrainerProfile.empty
     var hasLinkedTrainer = false
+    /// This client's own weight display preference (independent of their trainer).
     var weightUnit = "kg"
     var isLoaded = false
     var isSaving = false
+
+    var units: WeightUnit {
+        WeightUnit(rawValue: weightUnit) ?? .kg
+    }
 
     @MainActor
     func redeemInvite(code: String) async throws -> String {
@@ -33,6 +38,17 @@ final class ClientAccountStore {
         } catch {
             // Keep existing values when offline.
         }
+    }
+
+    /// Persists this client's weight unit only — never touches the trainer's preference.
+    @MainActor
+    func setWeightUnit(_ unit: WeightUnit) async {
+        weightUnit = unit.rawValue
+        guard let token = AuthStore.accessToken else { return }
+        _ = try? await VerraAPI.updateProfile(
+            accessToken: token,
+            body: UpdateProfileBody(weightUnit: unit.rawValue)
+        )
     }
 
     @MainActor
@@ -83,7 +99,8 @@ final class ClientAccountStore {
                 age: age,
                 heightCm: heightCm,
                 weightKg: weightKg,
-                goalWeightKg: goalWeightKg
+                goalWeightKg: goalWeightKg,
+                weightUnit: weightUnit
             )
         )
         await ProfileLoader.applyClientProfile(response, to: self)

@@ -17,6 +17,8 @@ final class MessageStore {
     private var activeConversationID: UUID?
     /// Bumped on local unread changes so an in-flight poll can't wipe a newer WS update.
     private var inboxEpoch = 0
+    /// Maps local placeholder conversation IDs → canonical server IDs after adoption.
+    private var conversationIDAliases: [UUID: UUID] = [:]
 
     init(conversations: [Conversation] = []) {
         self.conversations = conversations
@@ -83,7 +85,19 @@ final class MessageStore {
     }
 
     func conversation(id: UUID) -> Conversation? {
-        conversations.first { $0.id == id }
+        let canonical = canonicalConversationID(id)
+        return conversations.first { $0.id == canonical }
+    }
+
+    /// Resolves placeholder IDs to the server conversation they were adopted into.
+    func canonicalConversationID(_ id: UUID) -> UUID {
+        var current = id
+        var seen: Set<UUID> = []
+        while let next = conversationIDAliases[current], !seen.contains(next) {
+            seen.insert(current)
+            current = next
+        }
+        return current
     }
 
     // MARK: Archive / delete
@@ -129,13 +143,15 @@ final class MessageStore {
 
     @MainActor
     func start(accessToken: String) async {
+        // Load inbox before opening the socket so live `message.new` events
+        // aren't dropped because the conversation isn't local yet.
+        await refreshFromServer()
         ChatWebSocketService.shared.onEvent = { [weak self] event in
             Task { @MainActor in
                 self?.handle(event: event)
             }
         }
         ChatWebSocketService.shared.connect(accessToken: accessToken)
-        await refreshFromServer()
         await flushOfflineQueue()
         startPolling(accessToken: accessToken)
         await ChatPushService.registerIfNeeded()
@@ -204,14 +220,21 @@ final class MessageStore {
     @MainActor
     func loadMessages(for conversationID: UUID) async {
         guard let token = AuthStore.accessToken else { return }
-        activeConversationID = conversationID
+        let id = canonicalConversationID(conversationID)
+        activeConversationID = id
         do {
-            let page = try await VerraAPI.fetchMessages(conversationID: conversationID, accessToken: token)
-            applyMessages(page.messages.map(MessageLoader.message(from:)), to: conversationID)
-            _ = try? await VerraAPI.markConversationRead(conversationID: conversationID, accessToken: token)
-            markReadLocal(conversationID)
+            let page = try await VerraAPI.fetchMessages(conversationID: id, accessToken: token)
+            applyMessages(page.messages.map(MessageLoader.message(from:)), to: id)
+            _ = try? await VerraAPI.markConversationRead(conversationID: id, accessToken: token)
+            markReadLocal(id)
         } catch {
-            // Keep existing thread content.
+            // Placeholder conversation IDs 404 — adopt the server thread and load that instead.
+            if isConversationNotFound(error) {
+                let resolved = await resolveServerConversationID(id)
+                if resolved != id {
+                    await loadMessages(for: resolved)
+                }
+            }
         }
     }
 
@@ -257,6 +280,13 @@ final class MessageStore {
 
         conversations.removeAll { $0.clientID == clientID && $0.id != server.id }
 
+        // Offline queue may still reference the local placeholder UUID.
+        let placeholderIDs = placeholders.map(\.id)
+        ChatOfflineQueue.rewriteConversationID(from: placeholderIDs, to: server.id)
+        for oldID in placeholderIDs {
+            conversationIDAliases[oldID] = server.id
+        }
+
         if let index = conversations.firstIndex(where: { $0.id == server.id }) {
             if conversations[index].messages.count > adopted.messages.count {
                 adopted.messages = conversations[index].messages
@@ -266,6 +296,9 @@ final class MessageStore {
             conversations.insert(adopted, at: 0)
         }
         conversations = coalesceByClient(conversations)
+        if let active = activeConversationID, placeholderIDs.contains(active) {
+            activeConversationID = server.id
+        }
         return server.id
     }
 
@@ -359,8 +392,20 @@ final class MessageStore {
             replaceMessage(optimisticID, with: MessageLoader.message(from: dto), in: id)
             updatePreview(for: id, preview: kind.preview, at: dto.createdAt ?? .now)
         } catch {
-            // Drop the temp bubble and fall back to the offline queue (which
-            // re-adds a local copy and retries on the next sync).
+            // Local placeholder IDs 404 — resolve the canonical server thread and retry once.
+            if isConversationNotFound(error),
+               let retried = await retrySendAfterResolve(
+                kind: kind,
+                attachmentURL: attachmentURL,
+                optimisticID: optimisticID,
+                from: id,
+                accessToken: token
+               ) {
+                let dest = retried.conversationID
+                replaceMessage(optimisticID, with: MessageLoader.message(from: retried), in: dest)
+                updatePreview(for: dest, preview: kind.preview, at: retried.createdAt ?? .now)
+                return
+            }
             removeMessage(optimisticID, from: id)
             enqueueOffline(kind: kind, conversationID: id, attachmentURL: attachmentURL)
         }
@@ -407,6 +452,18 @@ final class MessageStore {
                 updatePreview(for: conversationID, preview: upload.kind.preview, at: dto.createdAt ?? .now)
                 return true
             } catch {
+                if isConversationNotFound(error),
+                   let retried = await retrySendAfterResolve(
+                    kind: upload.kind,
+                    attachmentURL: response.attachmentURL,
+                    optimisticID: optimisticID,
+                    from: conversationID,
+                    accessToken: token
+                   ) {
+                    replaceMessage(optimisticID, with: MessageLoader.message(from: retried), in: retried.conversationID)
+                    updatePreview(for: retried.conversationID, preview: upload.kind.preview, at: retried.createdAt ?? .now)
+                    return true
+                }
                 removeMessage(optimisticID, from: conversationID)
                 enqueueOffline(
                     kind: upload.kind,
@@ -416,6 +473,13 @@ final class MessageStore {
                 return true
             }
         } catch {
+            // Upload 404 on placeholder — resolve and retry the whole attachment send once.
+            if isConversationNotFound(error) {
+                let resolved = await resolveServerConversationID(conversationID)
+                if resolved != conversationID {
+                    return await sendAttachment(upload, to: resolved)
+                }
+            }
             return false
         }
     }
@@ -456,29 +520,8 @@ final class MessageStore {
         switch event.type {
         case "message.new":
             guard let dto = event.message else { return }
-            let wasNew = append(MessageLoader.message(from: dto), to: dto.conversationID)
-            updatePreview(for: dto.conversationID, preview: dto.body, at: dto.createdAt ?? .now)
-            if wasNew, !dto.isOutgoing {
-                if dto.conversationID == activeConversationID {
-                    Task { await acknowledgeRead(conversationID: dto.conversationID) }
-                } else {
-                    markUnread(dto.conversationID)
-                    Task { await acknowledgeDelivered(conversationID: dto.conversationID) }
-                    let senderName = conversation(id: dto.conversationID)?.clientName ?? ""
-                    let kind = MessageLoader.message(from: dto).kind
-                    let copy = ChatNotificationRouter.alertCopy(senderName: senderName, kind: kind)
-                    ChatPushService.showLocalNotification(
-                        title: copy.title,
-                        body: copy.body,
-                        conversationID: dto.conversationID
-                    )
-                    ChatNotificationRouter.postIncomingChatAlert(
-                        title: copy.title,
-                        body: copy.body,
-                        conversationID: dto.conversationID
-                    )
-                    NotificationCenter.default.post(name: .refreshNotifications, object: nil)
-                }
+            Task { @MainActor in
+                await ingestIncomingMessage(dto)
             }
         case "conversation.read":
             // The *other* participant read the thread — update our outgoing ticks only.
@@ -528,6 +571,47 @@ final class MessageStore {
         }
     }
 
+    /// Applies a live incoming message, refreshing the inbox first when the
+    /// conversation isn't local yet (new thread / previously soft-deleted).
+    @MainActor
+    private func ingestIncomingMessage(_ dto: MessageDTO) async {
+        if conversations.first(where: { $0.id == dto.conversationID }) == nil {
+            await refreshFromServer()
+        }
+
+        var wasNew = append(MessageLoader.message(from: dto), to: dto.conversationID)
+        if !wasNew, conversations.first(where: { $0.id == dto.conversationID }) == nil {
+            // Second chance — send restores soft-deleted threads server-side.
+            await refreshFromServer()
+            wasNew = append(MessageLoader.message(from: dto), to: dto.conversationID)
+        }
+
+        updatePreview(for: dto.conversationID, preview: dto.body, at: dto.createdAt ?? .now)
+        guard wasNew, !dto.isOutgoing else { return }
+
+        let conversationID = canonicalConversationID(dto.conversationID)
+        if activeConversationID == conversationID {
+            await acknowledgeRead(conversationID: conversationID)
+        } else {
+            markUnread(conversationID)
+            await acknowledgeDelivered(conversationID: conversationID)
+            let senderName = conversation(id: conversationID)?.clientName ?? ""
+            let kind = MessageLoader.message(from: dto).kind
+            let copy = ChatNotificationRouter.alertCopy(senderName: senderName, kind: kind)
+            ChatPushService.showLocalNotification(
+                title: copy.title,
+                body: copy.body,
+                conversationID: conversationID
+            )
+            ChatNotificationRouter.postIncomingChatAlert(
+                title: copy.title,
+                body: copy.body,
+                conversationID: conversationID
+            )
+            NotificationCenter.default.post(name: .refreshNotifications, object: nil)
+        }
+    }
+
     @MainActor
     private func applyPresence(userID: UUID, isOnline: Bool, lastSeen: Date?) {
         for index in conversations.indices {
@@ -540,13 +624,14 @@ final class MessageStore {
     @MainActor
     @discardableResult
     private func append(_ message: Message, to conversationID: UUID) -> Bool {
+        let id = canonicalConversationID(conversationID)
         var inserted = false
-        updateMessages(in: conversationID) { messages in
+        updateMessages(in: id) { messages in
             guard !messages.contains(where: { $0.id == message.id }) else { return }
             messages.append(message)
             inserted = true
         }
-        if inserted, let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+        if inserted, let index = conversations.firstIndex(where: { $0.id == id }) {
             conversations[index].lastActiveAt = message.sentAt
         }
         return inserted
@@ -556,7 +641,8 @@ final class MessageStore {
     /// If a live `message.new` event already inserted the server row, just drop the temp.
     @MainActor
     private func replaceMessage(_ optimisticID: UUID, with server: Message, in conversationID: UUID) {
-        updateMessages(in: conversationID) { messages in
+        let id = canonicalConversationID(conversationID)
+        updateMessages(in: id) { messages in
             if let index = messages.firstIndex(where: { $0.id == optimisticID }) {
                 if messages.contains(where: { $0.id == server.id }) {
                     messages.remove(at: index)
@@ -567,21 +653,22 @@ final class MessageStore {
                 messages.append(server)
             }
         }
-        if let index = conversations.firstIndex(where: { $0.id == conversationID }) {
+        if let index = conversations.firstIndex(where: { $0.id == id }) {
             conversations[index].lastActiveAt = server.sentAt
         }
     }
 
     @MainActor
     private func removeMessage(_ messageID: UUID, from conversationID: UUID) {
-        updateMessages(in: conversationID) { messages in
+        updateMessages(in: canonicalConversationID(conversationID)) { messages in
             messages.removeAll { $0.id == messageID }
         }
     }
 
     @MainActor
     private func applyMessages(_ messages: [Message], to conversationID: UUID) {
-        guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+        let id = canonicalConversationID(conversationID)
+        guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
         let previous = conversations[index].messages
         let existingStatus = Dictionary(uniqueKeysWithValues: previous.map { ($0.id, $0.deliveryStatus) })
         var byID = Dictionary(uniqueKeysWithValues: previous.map { ($0.id, $0) })
@@ -597,7 +684,8 @@ final class MessageStore {
 
     @MainActor
     private func updateMessages(in conversationID: UUID, _ transform: (inout [Message]) -> Void) {
-        guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+        let id = canonicalConversationID(conversationID)
+        guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
         var messages = conversations[index].messages
         transform(&messages)
         conversations[index].messages = messages
@@ -612,7 +700,8 @@ final class MessageStore {
 
     @MainActor
     private func updatePreview(for conversationID: UUID, preview: String, at date: Date) {
-        guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+        let id = canonicalConversationID(conversationID)
+        guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
         conversations[index].lastMessagePreview = preview
         conversations[index].lastMessageAt = date
         conversations[index].lastActiveAt = date
@@ -632,9 +721,84 @@ final class MessageStore {
         updateMessages(in: dto.conversationID) { messages in
             guard let index = messages.firstIndex(where: { $0.id == dto.id }) else { return }
             guard messages[index].isOutgoing else { return }
-            messages[index].deliveryStatus =
-                MessageDeliveryStatus(rawValue: dto.status) ?? messages[index].deliveryStatus
+            let incoming = MessageDeliveryStatus(rawValue: dto.status) ?? messages[index].deliveryStatus
+            messages[index].deliveryStatus = maxDeliveryStatus(messages[index].deliveryStatus, incoming)
         }
+    }
+
+    /// Ensures we POST against the canonical server conversation, not a local placeholder UUID.
+    @MainActor
+    private func resolveServerConversationID(_ id: UUID) async -> UUID {
+        guard let token = AuthStore.accessToken,
+              let convo = conversations.first(where: { $0.id == id }) else {
+            return id
+        }
+
+        // Trainer path — get-or-create by client id.
+        if let dto = try? await VerraAPI.getOrCreateConversation(
+            clientID: convo.clientID,
+            accessToken: token
+        ) {
+            return adoptServerConversation(MessageLoader.conversation(from: dto), for: convo.clientID)
+        }
+
+        // Client path — single "mine" thread with their coach.
+        if let mine = try? await VerraAPI.getOrCreateMyConversation(accessToken: token) {
+            let adopted = MessageLoader.conversation(from: mine)
+            let placeholders = conversations.filter { $0.id == id && $0.id != adopted.id }
+            var merged = adopted
+            let migrated = placeholders.flatMap(\.messages) + (conversations.first(where: { $0.id == adopted.id })?.messages ?? [])
+            if !migrated.isEmpty {
+                var messages = merged.messages
+                for message in migrated where !messages.contains(where: { $0.id == message.id }) {
+                    messages.append(message)
+                }
+                merged.messages = messages.sorted { $0.sentAt < $1.sentAt }
+            }
+            conversations.removeAll { $0.id == id && $0.id != adopted.id }
+            ChatOfflineQueue.rewriteConversationID(from: [id], to: adopted.id)
+            if let index = conversations.firstIndex(where: { $0.id == adopted.id }) {
+                conversations[index] = merged
+            } else {
+                conversations.insert(merged, at: 0)
+            }
+            return adopted.id
+        }
+
+        return id
+    }
+
+    @MainActor
+    private func retrySendAfterResolve(
+        kind: MessageKind,
+        attachmentURL: String?,
+        optimisticID: UUID,
+        from conversationID: UUID,
+        accessToken: String
+    ) async -> MessageDTO? {
+        let resolved = await resolveServerConversationID(conversationID)
+        guard resolved != conversationID || conversations.contains(where: { $0.id == resolved }) else {
+            return nil
+        }
+        if resolved != conversationID {
+            // Move the optimistic bubble onto the canonical thread.
+            if let cIndex = conversations.firstIndex(where: { $0.id == conversationID }),
+               let mIndex = conversations[cIndex].messages.firstIndex(where: { $0.id == optimisticID }) {
+                let bubble = conversations[cIndex].messages.remove(at: mIndex)
+                append(bubble, to: resolved)
+            }
+        }
+        return try? await VerraAPI.sendMessage(
+            conversationID: resolved,
+            kind: kind,
+            attachmentURL: attachmentURL,
+            accessToken: accessToken
+        )
+    }
+
+    private func isConversationNotFound(_ error: Error) -> Bool {
+        guard case APIError.server(let reason) = error else { return false }
+        return reason.localizedCaseInsensitiveContains("not found")
     }
 
     @MainActor
@@ -657,7 +821,8 @@ final class MessageStore {
 
     @MainActor
     private func markReadLocal(_ id: UUID) {
-        guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        let conversationID = canonicalConversationID(id)
+        guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
         inboxEpoch += 1
         conversations[index].isUnread = false
         conversations[index].unreadMessageCount = 0
@@ -665,7 +830,8 @@ final class MessageStore {
 
     @MainActor
     private func markUnread(_ id: UUID) {
-        guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
+        let conversationID = canonicalConversationID(id)
+        guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
         inboxEpoch += 1
         conversations[index].isUnread = true
         conversations[index].unreadMessageCount += 1
@@ -685,8 +851,27 @@ final class MessageStore {
         guard let token = AuthStore.accessToken else { return }
         let pending = ChatOfflineQueue.load()
         guard !pending.isEmpty else { return }
+
+        // Rewrite any placeholder conversation IDs before flushing.
+        var resolvedPending: [PendingChatMessage] = []
+        for item in pending {
+            let resolvedID = await resolveServerConversationID(item.conversationID)
+            if resolvedID != item.conversationID {
+                ChatOfflineQueue.rewriteConversationID(from: [item.conversationID], to: resolvedID)
+            }
+            resolvedPending.append(
+                PendingChatMessage(
+                    id: item.id,
+                    conversationID: resolvedID,
+                    kind: item.kind,
+                    body: item.body,
+                    attachmentURL: item.attachmentURL
+                )
+            )
+        }
+
         do {
-            _ = try await VerraAPI.flushOfflineQueue(pending, accessToken: token)
+            _ = try await VerraAPI.flushOfflineQueue(resolvedPending, accessToken: token)
             ChatOfflineQueue.clear()
             await refreshFromServer()
         } catch {

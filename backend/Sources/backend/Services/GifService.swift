@@ -33,7 +33,11 @@ enum GifService {
         }
         let payload = try response.content.decode(GiphyListResponse.self)
         return payload.data.compactMap { item in
-            guard let url = item.images.fixedWidth?.url ?? item.images.original?.url else {
+            // Prefer classic GIF URLs — some Giphy variants serve webp/mp4 that
+            // break our image/gif upload + ImageIO animation path on device.
+            guard let url = item.images.downsized?.url
+                ?? item.images.fixedWidth?.url
+                ?? item.images.original?.url else {
                 return nil
             }
             let preview = item.images.fixedWidthStill?.url
@@ -78,12 +82,14 @@ private struct GiphyImages: Content {
     let original: GiphyImageAsset?
     let fixedWidth: GiphyImageAsset?
     let fixedWidthStill: GiphyImageAsset?
+    let downsized: GiphyImageAsset?
     let downsizedStill: GiphyImageAsset?
 
     enum CodingKeys: String, CodingKey {
         case original
         case fixedWidth = "fixed_width"
         case fixedWidthStill = "fixed_width_still"
+        case downsized
         case downsizedStill = "downsized_still"
     }
 }

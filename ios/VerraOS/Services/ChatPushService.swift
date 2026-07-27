@@ -7,29 +7,33 @@ enum ChatPushService {
     static func registerIfNeeded() async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
-        guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
+        if settings.authorizationStatus == .notDetermined {
             _ = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
-            await MainActor.run {
-                UIApplication.shared.registerForRemoteNotifications()
-            }
-            return
         }
 
         await MainActor.run {
             UIApplication.shared.registerForRemoteNotifications()
         }
 
-        guard let token = AuthStore.accessToken else { return }
-        if let stored = UserDefaults.standard.string(forKey: "verra.apns.token"), !stored.isEmpty {
-            try? await VerraAPI.registerPushToken(stored, accessToken: token)
+        await uploadStoredTokenIfPossible()
+    }
+
+    static func storeDeviceToken(_ deviceToken: String) {
+        UserDefaults.standard.set(deviceToken, forKey: "verra.apns.token")
+        Task { @MainActor in
+            await uploadStoredTokenIfPossible()
         }
     }
 
-    static func storeDeviceToken(_ token: String) {
-        UserDefaults.standard.set(token, forKey: "verra.apns.token")
-        Task { @MainActor in
-            guard let accessToken = AuthStore.accessToken else { return }
-            try? await VerraAPI.registerPushToken(token, accessToken: token)
+    @MainActor
+    private static func uploadStoredTokenIfPossible() async {
+        guard let accessToken = AuthStore.accessToken else { return }
+        guard let deviceToken = UserDefaults.standard.string(forKey: "verra.apns.token"),
+              !deviceToken.isEmpty else { return }
+        do {
+            try await VerraAPI.registerPushToken(deviceToken, accessToken: accessToken)
+        } catch {
+            // Keep the stored token — next launch / auth refresh will retry.
         }
     }
 

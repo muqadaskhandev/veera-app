@@ -22,7 +22,7 @@ struct ClientDashboardView: View {
     @Environment(WearableConnectionStore.self) private var wearables
     @Environment(ClientAccountStore.self) private var account
 
-    private var unit: WeightUnit { trainer.units }
+    private var unit: WeightUnit { account.units }
 
     @State private var path = NavigationPath()
     @State private var isRefreshing = false
@@ -84,7 +84,7 @@ struct ClientDashboardView: View {
         await account.refreshFromServer()
         if let loaded = account.client {
             clientStore.clients = [loaded]
-            trainer.profile.weightUnit = WeightUnit(rawValue: account.weightUnit) ?? .kg
+            trainer.applyDisplayUnit(account.units)
             profile.applyWeightTargets(from: loaded)
             profile.applyVisibleModules(loaded.visibleModules, for: loaded.id)
             await profile.refreshAllVisibleModules(for: loaded)

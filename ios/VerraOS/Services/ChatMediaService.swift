@@ -27,6 +27,8 @@ enum ChatMediaService {
     /// trip — `preparePhoto` would flatten it to a single static JPEG frame.
     static func prepareGIF(from data: Data) -> PreparedUpload? {
         guard !data.isEmpty else { return nil }
+        // Reject non-GIF payloads (Giphy occasionally redirects to webp/mp4).
+        guard ChatAttachmentLoader.isGIFData(data) else { return nil }
         return PreparedUpload(
             data: data,
             filename: "gif-\(UUID().uuidString).gif",

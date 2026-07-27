@@ -40,6 +40,7 @@ struct ChatThreadView: View {
     @State private var isUploadingMedia = false
     @State private var showingFileImporter = false
     @State private var showingGIFPicker = false
+    @State private var isLoadingMessages = false
 
     private var conversation: Conversation? { store.conversation(id: conversationID) }
     private var client: Client? {
@@ -56,7 +57,7 @@ struct ChatThreadView: View {
             if let conversation {
                 content(conversation)
             } else {
-                VStack { Spacer(); Text("Conversation unavailable").foregroundStyle(Theme.Color.inkMuted); Spacer() }
+                unavailableState
             }
         }
         .background(Theme.Color.background)
@@ -71,7 +72,10 @@ struct ChatThreadView: View {
             if !coachMode { app.isChatThreadOpen = true }
         }
         .task(id: conversationID) {
+            let needsSkeleton = orderedMessages.isEmpty
+            if needsSkeleton { isLoadingMessages = true }
             await store.loadMessages(for: conversationID)
+            isLoadingMessages = false
         }
         .onDisappear {
             if voiceRecorder.isRecording { voiceRecorder.cancel() }
@@ -95,6 +99,85 @@ struct ChatThreadView: View {
         }
     }
 
+    /// Shown when the thread isn't in the store yet (no coach linked, placeholder
+    /// ID, etc.). Always includes a back control in coach mode so the user isn't stuck.
+    private var unavailableState: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 11) {
+                if showsBack {
+                    backButton
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(coachMode ? (coachName.isEmpty ? "Messages" : coachName) : "Messages")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Theme.Color.ink)
+                        .lineLimit(1)
+                    if coachMode, !coachSubtitle.isEmpty {
+                        Text(coachSubtitle)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.Color.inkMuted)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.sm)
+            .background(Theme.Color.background)
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.Color.hairline).frame(height: 1) }
+
+            Spacer()
+            VStack(spacing: 10) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 32, weight: .semibold))
+                    .foregroundStyle(Theme.Color.inkFaint)
+                Text(coachMode ? "No conversation yet" : "Conversation unavailable")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.Color.inkMuted)
+                Text(coachMode
+                     ? "Connect with your trainer to start chatting."
+                     : "This thread isn’t available right now.")
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(Theme.Color.inkFaint)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                if showsBack {
+                    Button {
+                        handleBack()
+                    } label: {
+                        Text("Go Back")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Theme.Color.accentInk)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 11)
+                            .background(Theme.Color.accent, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 8)
+                }
+            }
+            Spacer()
+        }
+    }
+
+    private var backButton: some View {
+        Button(action: handleBack) {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(Theme.Color.ink)
+                .frame(width: 40, height: 40)
+                .background(Theme.Color.surface, in: Circle())
+                .overlay(Circle().stroke(Theme.Color.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Back")
+    }
+
+    private func handleBack() {
+        if let onBack { onBack() }
+        else if !path.isEmpty { path.removeLast() }
+    }
+
     private func content(_ conversation: Conversation) -> some View {
         VStack(spacing: 0) {
             header(conversation)
@@ -111,18 +194,7 @@ struct ChatThreadView: View {
     private func header(_ conversation: Conversation) -> some View {
         HStack(spacing: 11) {
             if showsBack {
-                Button {
-                    if let onBack { onBack() }
-                    else if !path.isEmpty { path.removeLast() }
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(Theme.Color.ink)
-                        .frame(width: 40, height: 40)
-                        .background(Theme.Color.surface, in: Circle())
-                        .overlay(Circle().stroke(Theme.Color.hairline, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
+                backButton
             }
 
             ChatParticipantAvatar(
@@ -178,28 +250,34 @@ struct ChatThreadView: View {
     // MARK: Message stream
 
     private var messageStream: some View {
-        ScrollViewReader { proxy in
-            ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: 14) {
-                    ForEach(orderedMessages) { message in
-                        MessageBubble(message: message) {
-                            withAnimation(.spring(response: 0.32, dampingFraction: 0.7)) {
-                                reactionTarget = message
+        Group {
+            if isLoadingMessages && orderedMessages.isEmpty {
+                ChatThreadSkeleton()
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(showsIndicators: false) {
+                        LazyVStack(spacing: 14) {
+                            ForEach(orderedMessages) { message in
+                                MessageBubble(message: message) {
+                                    withAnimation(.spring(response: 0.32, dampingFraction: 0.7)) {
+                                        reactionTarget = message
+                                    }
+                                }
+                                .id(message.id)
                             }
+                            Color.clear.frame(height: 1).id("bottom")
                         }
-                        .id(message.id)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.md)
                     }
-                    Color.clear.frame(height: 1).id("bottom")
-                }
-                .padding(.horizontal, Theme.Spacing.md)
-                .padding(.vertical, Theme.Spacing.md)
-            }
-            .onChange(of: orderedMessages.count) { _, _ in
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
+                    .onChange(of: orderedMessages.count) { _, _ in
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                    }
+                    .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
             }
-            .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
         }
         .frame(maxHeight: .infinity)
     }
@@ -359,12 +437,17 @@ struct ChatThreadView: View {
         .overlay {
             if isUploadingMedia {
                 ZStack {
-                    Color.black.opacity(0.12)
-                    ProgressView("Sending…")
-                        .font(.system(size: 13, weight: .semibold))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(Theme.Color.surface, in: Capsule())
+                    Color.black.opacity(0.08)
+                    HStack(spacing: 10) {
+                        SkeletonBone(width: 18, height: 18, cornerRadius: 9)
+                        Text("Sending…")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.Color.ink)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Theme.Color.surface, in: Capsule())
+                    .overlay(Capsule().stroke(Theme.Color.hairline, lineWidth: 1))
                 }
             }
         }
@@ -618,6 +701,7 @@ private struct MessageBubble: View {
 
     @State private var playbackURL: URL?
     @State private var isLoadingVideo = false
+    @State private var videoLoadFailed = false
 
     var body: some View {
         HStack {
@@ -744,11 +828,16 @@ private struct MessageBubble: View {
         Button {
             guard !isLoadingVideo else { return }
             isLoadingVideo = true
+            videoLoadFailed = false
             Task {
                 let url = await ChatAttachmentLoader.localVideoURL(for: path)
                 await MainActor.run {
                     isLoadingVideo = false
-                    playbackURL = url
+                    if let url {
+                        playbackURL = url
+                    } else {
+                        videoLoadFailed = true
+                    }
                 }
             }
         } label: {
@@ -757,8 +846,20 @@ private struct MessageBubble: View {
                     .fill(message.isOutgoing ? Theme.Color.accentInk : Theme.Color.ink)
                     .frame(width: 220, height: 220)
                 if isLoadingVideo {
-                    ProgressView()
-                        .tint(Theme.Color.accent)
+                    SkeletonBone(width: 220, height: 220, cornerRadius: 20)
+                        .opacity(0.55)
+                } else if videoLoadFailed {
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundStyle(Theme.Color.accent)
+                        Text("Couldn't load video")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.Color.background.opacity(0.85))
+                        Text("Tap to retry")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.Color.background.opacity(0.55))
+                    }
                 } else {
                     Image(systemName: "play.circle.fill")
                         .font(.system(size: 52, weight: .regular))
@@ -808,8 +909,7 @@ private struct VoiceNoteBubble: View {
                 HStack(spacing: 10) {
                     Group {
                         if isLoading {
-                            ProgressView()
-                                .scaleEffect(0.85)
+                            SkeletonBone(width: 14, height: 14, cornerRadius: 7)
                         } else {
                             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                                 .font(.system(size: 14, weight: .bold))

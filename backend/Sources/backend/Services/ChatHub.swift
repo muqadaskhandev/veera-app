@@ -57,7 +57,12 @@ actor ChatHub {
     func send(to userID: UUID, event: ChatEvent) async {
         guard let ids = userConnectionIDs[userID], !ids.isEmpty else { return }
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            try container.encode(formatter.string(from: date))
+        }
         guard let payload = try? encoder.encode(event),
               let text = String(data: payload, encoding: .utf8) else { return }
 
