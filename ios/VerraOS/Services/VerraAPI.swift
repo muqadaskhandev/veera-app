@@ -808,6 +808,14 @@ enum VerraAPI {
         )
     }
 
+    static func deleteMessage(messageID: UUID, accessToken: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.request(
+            "/api/messages/\(messageID.uuidString)",
+            method: "DELETE",
+            token: accessToken
+        )
+    }
+
     static func registerPushToken(_ token: String, accessToken: String) async throws {
         let _: EmptyResponse = try await APIClient.shared.request(
             "/api/devices/push-token",

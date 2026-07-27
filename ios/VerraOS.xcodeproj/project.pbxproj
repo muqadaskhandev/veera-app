@@ -422,6 +422,7 @@
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Verra uses Apple Health to keep your coaching metrics accurate. Health data is updated only as needed to support your training progress with your trainer.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Verra connects to your local development server on your Mac so you can sign in and sync data while testing.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Verra uses your microphone to record voice and video messages in chat.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Verra saves chat photos and videos to your library when you choose Save.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Verra lets you choose photos from your library for progress photos and to send photos and videos in chat.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -469,6 +470,7 @@
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Verra uses Apple Health to keep your coaching metrics accurate. Health data is updated only as needed to support your training progress with your trainer.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Verra connects to your local development server on your Mac so you can sign in and sync data while testing.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Verra uses your microphone to record voice and video messages in chat.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Verra saves chat photos and videos to your library when you choose Save.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Verra lets you choose photos from your library for progress photos and to send photos and videos in chat.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

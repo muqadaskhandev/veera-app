@@ -507,6 +507,24 @@ final class MessageStore {
     }
 
     @MainActor
+    func deleteMessage(_ messageID: UUID, in conversationID: UUID) async {
+        let id = canonicalConversationID(conversationID)
+        removeMessage(messageID, from: id)
+        if let index = conversations.firstIndex(where: { $0.id == id }) {
+            let remaining = conversations[index].messages.sorted { $0.sentAt < $1.sentAt }
+            conversations[index].lastMessagePreview = remaining.last?.kind.preview
+            conversations[index].lastMessageAt = remaining.last?.sentAt
+            conversations[index].lastActiveAt = remaining.last?.sentAt ?? conversations[index].lastActiveAt
+        }
+        guard let token = AuthStore.accessToken else { return }
+        do {
+            try await VerraAPI.deleteMessage(messageID: messageID, accessToken: token)
+        } catch {
+            // Best-effort — local removal already happened for snappy UX.
+        }
+    }
+
+    @MainActor
     func sendTyping(conversationID: UUID, isTyping: Bool) {
         ChatWebSocketService.shared.sendTyping(conversationID: conversationID, isTyping: isTyping)
     }
@@ -545,6 +563,15 @@ final class MessageStore {
             updateMessages(in: conversationID) { messages in
                 guard let index = messages.firstIndex(where: { $0.id == messageID }) else { return }
                 messages[index].reaction = event.reaction.flatMap { Reaction(rawValue: $0) }
+            }
+        case "message.deleted":
+            guard let conversationID = event.conversationID,
+                  let messageID = event.messageID else { return }
+            removeMessage(messageID, from: conversationID)
+            if let index = conversations.firstIndex(where: { $0.id == canonicalConversationID(conversationID) }) {
+                let remaining = conversations[index].messages.sorted { $0.sentAt < $1.sentAt }
+                conversations[index].lastMessagePreview = remaining.last?.kind.preview
+                conversations[index].lastMessageAt = remaining.last?.sentAt
             }
         case "typing.start":
             if let id = event.conversationID { typingConversationIDs.insert(id) }

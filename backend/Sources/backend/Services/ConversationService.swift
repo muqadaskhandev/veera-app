@@ -459,6 +459,50 @@ enum ConversationService {
         return dto
     }
 
+    static func deleteMessage(
+        messageID: UUID,
+        for user: User,
+        on database: any Database
+    ) async throws {
+        guard let message = try await Message.find(messageID, on: database) else {
+            throw Abort(.notFound, reason: "Message not found")
+        }
+
+        let conversation = try await message.$conversation.get(on: database)
+        try await assertAccess(conversation, user: user, on: database)
+
+        let userID = try user.requireID()
+        guard message.$senderUser.id == userID else {
+            throw Abort(.forbidden, reason: "Only the sender can delete this message")
+        }
+
+        let conversationID = try conversation.requireID()
+        try await message.delete(on: database)
+
+        let latest = try await Message.query(on: database)
+            .filter(\.$conversation.$id == conversationID)
+            .sort(\.$createdAt, .descending)
+            .first()
+        if let latest {
+            conversation.lastMessagePreview = preview(for: latest.kind, body: latest.body)
+            conversation.lastMessageAt = latest.createdAt
+        } else {
+            conversation.lastMessagePreview = nil
+            conversation.lastMessageAt = nil
+        }
+        try await conversation.save(on: database)
+
+        let participants = try await participantUserIDs(conversationID: conversationID, on: database)
+        await ChatHub.shared.send(
+            toUserIDs: participants,
+            event: ChatEvent(
+                type: "message.deleted",
+                conversationID: conversationID,
+                messageID: messageID
+            )
+        )
+    }
+
     static func flushOfflineQueue(
         items: [QueuedMessageRequest],
         for user: User,

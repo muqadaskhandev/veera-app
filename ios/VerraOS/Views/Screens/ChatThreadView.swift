@@ -40,7 +40,10 @@ struct ChatThreadView: View {
     @State private var isUploadingMedia = false
     @State private var showingFileImporter = false
     @State private var showingGIFPicker = false
-    @State private var isLoadingMessages = false
+    /// True until the first message fetch finishes for an empty thread (avoids blank flash).
+    @State private var isLoadingMessages = true
+    @State private var pendingDelete: Message?
+    @State private var shareItems: [Any]?
 
     private var conversation: Conversation? { store.conversation(id: conversationID) }
     private var client: Client? {
@@ -65,15 +68,46 @@ struct ChatThreadView: View {
         .toast($toast)
         .overlay {
             if let target = reactionTarget {
-                reactionOverlay(for: target)
+                messageActionsOverlay(for: target)
+            }
+        }
+        .confirmationDialog(
+            "Delete this message?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                guard let pendingDelete else { return }
+                let id = pendingDelete.id
+                Task {
+                    await store.deleteMessage(id, in: conversationID)
+                    toast = ToastData(message: "Message deleted", icon: "trash.fill")
+                }
+                self.pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        }
+        .sheet(isPresented: Binding(
+            get: { shareItems != nil },
+            set: { if !$0 { shareItems = nil } }
+        )) {
+            if let shareItems {
+                ShareSheet(items: shareItems)
             }
         }
         .onAppear {
             if !coachMode { app.isChatThreadOpen = true }
+            if orderedMessages.isEmpty { isLoadingMessages = true }
         }
         .task(id: conversationID) {
-            let needsSkeleton = orderedMessages.isEmpty
-            if needsSkeleton { isLoadingMessages = true }
+            if orderedMessages.isEmpty {
+                isLoadingMessages = true
+            } else {
+                isLoadingMessages = false
+            }
             await store.loadMessages(for: conversationID)
             isLoadingMessages = false
         }
@@ -282,16 +316,16 @@ struct ChatThreadView: View {
         .frame(maxHeight: .infinity)
     }
 
-    // MARK: Reaction overlay
+    // MARK: Message actions (react / save / delete)
 
-    private func reactionOverlay(for message: Message) -> some View {
+    private func messageActionsOverlay(for message: Message) -> some View {
         ZStack {
             Color.black.opacity(0.18)
                 .ignoresSafeArea()
                 .onTapGesture {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { reactionTarget = nil }
                 }
-            VStack {
+            VStack(spacing: 12) {
                 HStack(spacing: 10) {
                     ForEach(Reaction.allCases) { reaction in
                         Button {
@@ -310,8 +344,109 @@ struct ChatThreadView: View {
                 .background(Theme.Color.surface, in: Capsule())
                 .overlay(Capsule().stroke(Theme.Color.hairline, lineWidth: 1))
                 .cardShadow()
-                .transition(.scale(scale: 0.6).combined(with: .opacity))
+
+                VStack(spacing: 0) {
+                    if canSave(message) {
+                        actionRow(title: saveActionTitle(for: message), icon: "square.and.arrow.down") {
+                            reactionTarget = nil
+                            Task { await saveAttachment(for: message) }
+                        }
+                    }
+                    if message.isOutgoing {
+                        if canSave(message) {
+                            Divider().background(Theme.Color.hairline)
+                        }
+                        actionRow(title: "Delete message", icon: "trash", destructive: true) {
+                            reactionTarget = nil
+                            pendingDelete = message
+                        }
+                    }
+                }
+                .frame(width: 260)
+                .background(Theme.Color.surface, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.Color.hairline, lineWidth: 1))
+                .cardShadow()
+                .opacity(canSave(message) || message.isOutgoing ? 1 : 0)
+                .allowsHitTesting(canSave(message) || message.isOutgoing)
             }
+            .transition(.scale(scale: 0.6).combined(with: .opacity))
+        }
+    }
+
+    private func actionRow(
+        title: String,
+        icon: String,
+        destructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 20)
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+            }
+            .foregroundStyle(destructive ? Color.red : Theme.Color.ink)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func canSave(_ message: Message) -> Bool {
+        guard message.attachmentURL != nil else { return false }
+        switch message.kind {
+        case .photo, .video, .file: return true
+        default: return false
+        }
+    }
+
+    private func saveActionTitle(for message: Message) -> String {
+        switch message.kind {
+        case .photo: return "Save photo"
+        case .video: return "Save video"
+        case .file: return "Save attachment"
+        default: return "Save"
+        }
+    }
+
+    @MainActor
+    private func saveAttachment(for message: Message) async {
+        guard let path = message.attachmentURL else { return }
+        switch message.kind {
+        case .photo:
+            guard let image = await ChatAttachmentLoader.image(for: path) else {
+                toast = ToastData(message: "Couldn't download photo", icon: "exclamationmark.triangle.fill")
+                return
+            }
+            do {
+                try await ChatMediaSaver.saveImage(image)
+                toast = ToastData(message: "Saved to Photos", icon: "checkmark.circle.fill")
+            } catch {
+                toast = ToastData(message: "Couldn't save photo", icon: "exclamationmark.triangle.fill")
+            }
+        case .video:
+            guard let url = await ChatAttachmentLoader.localVideoURL(for: path) else {
+                toast = ToastData(message: "Couldn't download video", icon: "exclamationmark.triangle.fill")
+                return
+            }
+            do {
+                try await ChatMediaSaver.saveVideo(at: url)
+                toast = ToastData(message: "Saved to Photos", icon: "checkmark.circle.fill")
+            } catch {
+                toast = ToastData(message: "Couldn't save video", icon: "exclamationmark.triangle.fill")
+            }
+        case .file(let name):
+            guard let url = await ChatAttachmentLoader.localDocumentURL(for: path, fileName: name) else {
+                toast = ToastData(message: "Couldn't download file", icon: "exclamationmark.triangle.fill")
+                return
+            }
+            shareItems = [url]
+        default:
+            break
         }
     }
 
@@ -1041,9 +1176,6 @@ private struct FileAttachmentBubble: View {
                 await MainActor.run {
                     isOpening = false
                     shareURL = url
-                    if url == nil {
-                        // No toast channel here — button simply no-ops if download fails.
-                    }
                 }
             }
         } label: {
@@ -1061,12 +1193,13 @@ private struct FileAttachmentBubble: View {
                     Text(name)
                         .font(.system(size: 14.5, weight: .semibold))
                         .foregroundStyle(isOutgoing ? Theme.Color.accentInk : Theme.Color.ink)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     Text(isOpening ? "Opening…" : "Tap to open")
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(isOutgoing ? Theme.Color.accentInk.opacity(0.7) : Theme.Color.inkMuted)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 if isOutgoing {
                     MessageDeliveryIndicator(status: deliveryStatus, onAccentBackground: true)
@@ -1074,7 +1207,7 @@ private struct FileAttachmentBubble: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .frame(maxWidth: maxWidth, alignment: .leading)
+            .frame(width: maxWidth, alignment: .leading)
             .background(bubbleBackground, in: RoundedRectangle(cornerRadius: 20))
             .overlay {
                 if !isOutgoing {
@@ -1083,6 +1216,7 @@ private struct FileAttachmentBubble: View {
             }
         }
         .buttonStyle(.plain)
+        .frame(width: maxWidth, alignment: isOutgoing ? .trailing : .leading)
         .disabled(path == nil)
         .sheet(isPresented: Binding(
             get: { shareURL != nil },

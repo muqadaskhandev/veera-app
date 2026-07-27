@@ -22,6 +22,7 @@ struct ConversationController: RouteCollection {
         let messages = routes.grouped("api", "messages")
             .grouped(JWTAuthMiddleware())
         messages.patch(":messageID", "reaction", use: setReaction)
+        messages.delete(":messageID", use: deleteMessage)
 
         let devices = routes.grouped("api", "devices")
             .grouped(JWTAuthMiddleware())
@@ -185,6 +186,16 @@ struct ConversationController: RouteCollection {
             for: user,
             on: req.db
         )
+    }
+
+    @Sendable
+    func deleteMessage(req: Request) async throws -> HTTPStatus {
+        let user = try req.auth.require(User.self)
+        guard let messageID = req.parameters.get("messageID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Invalid message ID")
+        }
+        try await ConversationService.deleteMessage(messageID: messageID, for: user, on: req.db)
+        return .noContent
     }
 
     @Sendable
