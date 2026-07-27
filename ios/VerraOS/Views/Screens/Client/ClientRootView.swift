@@ -95,11 +95,12 @@ struct ClientRootView: View {
         status: .active
     )
 
-    @State private var conversationID: UUID
+    @State private var conversationID: UUID = UUID()
     private let drawerWidth: CGFloat = 308
     private let appVersion = "v1.0.2"
     private let legalURL = URL(string: "https://verraos.app/legal")!
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
 
     init(onLogOut: @escaping () -> Void = {}) {
         self.onLogOut = onLogOut
@@ -109,9 +110,9 @@ struct ClientRootView: View {
         let sched = ScheduleStore(sessions: [], clients: [placeholder])
         _schedule = State(initialValue: sched)
 
-        let store = MessageStore(conversations: [MessageStore.clientThread(for: placeholder)])
-        _messages = State(initialValue: store)
-        _conversationID = State(initialValue: store.conversations.first?.id ?? UUID())
+        // Don't seed a fake local thread — that blocked ensureClientThread from
+        // creating/adopting the real coach conversation on the server.
+        _messages = State(initialValue: MessageStore())
 
         let p = ProfileStore()
         _profile = State(initialValue: p)
@@ -226,6 +227,10 @@ struct ClientRootView: View {
             await refreshAll()
             checkPendingInviteLink()
         }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await refreshChatState() }
+        }
         .onDisappear {
             messages.stop()
         }
@@ -242,8 +247,9 @@ struct ClientRootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openChatConversation)) { notification in
             guard let id = notification.object as? UUID else { return }
-            conversationID = id
+            conversationID = messages.canonicalConversationID(id)
             withAnimation(.easeInOut(duration: 0.2)) { tab = .messages }
+            Task { await refreshChatState() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openScheduleTab)) { _ in
             withAnimation(.easeInOut(duration: 0.2)) { tab = .schedule }
@@ -334,6 +340,17 @@ struct ClientRootView: View {
         }
     }
 
+    /// Soft refresh for unread badges + notification center (launch / foreground / push tap).
+    @MainActor
+    private func refreshChatState() async {
+        guard AuthStore.accessToken != nil else { return }
+        await messages.refreshFromServer()
+        await notifications.refreshFromServer()
+        if let id = await messages.ensureClientThread() {
+            conversationID = id
+        }
+    }
+
     // MARK: Shell
 
     private var shell: some View {
@@ -379,6 +396,13 @@ struct ClientRootView: View {
                     ) { newTab in
                         guard newTab != tab else { return }
                         withAnimation(.easeInOut(duration: 0.2)) { tab = newTab }
+                        if newTab == .messages {
+                            Task {
+                                if let id = await messages.ensureClientThread() {
+                                    conversationID = id
+                                }
+                            }
+                        }
                     }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }

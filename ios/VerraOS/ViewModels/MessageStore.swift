@@ -205,8 +205,16 @@ final class MessageStore {
                 }
             }
             // Keep optimistic local placeholders that haven't been adopted yet.
+            // Drop empty stubs (e.g. client "Loading…" seed) — they never match a
+            // real server clientID and would block ensureClientThread forever.
             for local in conversations where !merged.contains(where: { $0.id == local.id || $0.clientID == local.clientID }) {
-                merged.append(local)
+                let isEmptyStub = local.messages.isEmpty
+                    && local.lastMessageAt == nil
+                    && local.otherParticipantUserID == nil
+                    && local.lastMessagePreview == nil
+                if !isEmptyStub {
+                    merged.append(local)
+                }
             }
             // One thread per client — drop duplicate rows (e.g. from races before
             // the unique index) and migrate any local placeholder messages.
@@ -307,6 +315,55 @@ final class MessageStore {
         return server.id
     }
 
+    /// Client "mine" adoption — placeholders often use a fake `clientID` (Loading…
+    /// seed), so match by conversation id / empty stub rather than clientID alone.
+    @MainActor
+    @discardableResult
+    private func adoptClientMineConversation(_ server: Conversation, replacing placeholderID: UUID? = nil) -> UUID {
+        var adopted = server
+
+        let placeholders = conversations.filter { convo in
+            if convo.id == server.id { return false }
+            if let placeholderID, convo.id == placeholderID { return true }
+            // Empty local-only stubs from ClientRootView seed.
+            return convo.messages.isEmpty
+                && convo.lastMessageAt == nil
+                && convo.otherParticipantUserID == nil
+                && convo.lastMessagePreview == nil
+        }
+        let existing = conversations.first(where: { $0.id == server.id })
+        let migrated = placeholders.flatMap(\.messages) + (existing?.messages ?? [])
+        if !migrated.isEmpty {
+            var messages = adopted.messages
+            for message in migrated where !messages.contains(where: { $0.id == message.id }) {
+                messages.append(message)
+            }
+            adopted.messages = messages.sorted { $0.sentAt < $1.sentAt }
+        }
+        // Keep a higher local unread tally while the server still flags unread.
+        if adopted.isUnread, let existing, existing.unreadMessageCount > adopted.unreadMessageCount {
+            adopted.unreadMessageCount = existing.unreadMessageCount
+        }
+
+        let placeholderIDs = placeholders.map(\.id)
+        conversations.removeAll { placeholderIDs.contains($0.id) }
+        ChatOfflineQueue.rewriteConversationID(from: placeholderIDs, to: server.id)
+        for oldID in placeholderIDs {
+            conversationIDAliases[oldID] = server.id
+        }
+
+        if let index = conversations.firstIndex(where: { $0.id == server.id }) {
+            conversations[index] = adopted
+        } else {
+            conversations = [adopted]
+        }
+        isLoadedFromServer = true
+        if let active = activeConversationID, placeholderIDs.contains(active) {
+            activeConversationID = server.id
+        }
+        return server.id
+    }
+
     /// Keeps one conversation per client (most recent / most messages wins).
     private func coalesceByClient(_ list: [Conversation]) -> [Conversation] {
         var byClient: [UUID: Conversation] = [:]
@@ -337,20 +394,17 @@ final class MessageStore {
 
     @MainActor
     func ensureClientThread() async -> UUID? {
-        guard let token = AuthStore.accessToken else { return conversations.first?.id }
-        if !isLoadedFromServer {
-            await refreshFromServer()
+        guard let token = AuthStore.accessToken else {
+            return conversations.first.map { canonicalConversationID($0.id) }
         }
-        if let existing = conversations.first {
-            return existing.id
-        }
+        // Always hit the server — a local placeholder must never short-circuit this,
+        // or the client UI stays pointed at a fake UUID with no trainer thread.
         do {
             let dto = try await VerraAPI.getOrCreateMyConversation(accessToken: token)
-            let convo = MessageLoader.conversation(from: dto)
-            conversations = [convo]
-            return convo.id
+            return adoptClientMineConversation(MessageLoader.conversation(from: dto))
         } catch {
-            return conversations.first?.id
+            await refreshFromServer()
+            return conversations.first.map { canonicalConversationID($0.id) }
         }
     }
 
@@ -802,25 +856,10 @@ final class MessageStore {
 
         // Client path — single "mine" thread with their coach.
         if let mine = try? await VerraAPI.getOrCreateMyConversation(accessToken: token) {
-            let adopted = MessageLoader.conversation(from: mine)
-            let placeholders = conversations.filter { $0.id == id && $0.id != adopted.id }
-            var merged = adopted
-            let migrated = placeholders.flatMap(\.messages) + (conversations.first(where: { $0.id == adopted.id })?.messages ?? [])
-            if !migrated.isEmpty {
-                var messages = merged.messages
-                for message in migrated where !messages.contains(where: { $0.id == message.id }) {
-                    messages.append(message)
-                }
-                merged.messages = messages.sorted { $0.sentAt < $1.sentAt }
-            }
-            conversations.removeAll { $0.id == id && $0.id != adopted.id }
-            ChatOfflineQueue.rewriteConversationID(from: [id], to: adopted.id)
-            if let index = conversations.firstIndex(where: { $0.id == adopted.id }) {
-                conversations[index] = merged
-            } else {
-                conversations.insert(merged, at: 0)
-            }
-            return adopted.id
+            return adoptClientMineConversation(
+                MessageLoader.conversation(from: mine),
+                replacing: id
+            )
         }
 
         return id
